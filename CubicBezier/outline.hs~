@@ -1,0 +1,23 @@
+module Outline where
+import Data.List
+import Geom2D
+import Bezier
+
+data Side = LeftSide | RightSide
+
+offsetPoint dist Left start tangent = addVector start
+                                      (rotateVector90Left $ scaleVector dist $ unitVector tangent)
+offsetPoint dist Right start tangent = addVector start
+                                      (rotateVector90Right $ scaleVector dist $ unitVector tangent)
+
+bezierOffsetPoint cb side dist t = offsetPoint dist side $ calcBezierAndDeriv cb t
+
+bezierOffset cb@(CubicBezier (p1x, p1y) (p2x, p2y) (p3x, p3y) (p4x, p4y)) side dist =
+  approximateCurveWithTs offsetCb points ts
+  where offsetCb = CubicBezier
+                   (offsetPoint dist side (p1x, p1y, p2x - p1x, p2y - p1y))
+                   (offsetPoint dist side (p2x, p2y, p2x - p1x, p2y - p1y))
+                   (offsetPoint dist side (p3x, p3y, p4x - p3x, p4y - p3y))
+                   (offsetPoint dist side (p4x, p4y, p4x - p3x, p4y - p3y))
+        points = map (bezierOffsetPoint cb side dist) ts
+        ts = [0.1,0.2..0.9]
