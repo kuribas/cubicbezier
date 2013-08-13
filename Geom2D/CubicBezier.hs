@@ -1,3 +1,5 @@
+-- | Export all the cubic bezier modules.
+
 module Geom2D.CubicBezier
        (module Geom2D.CubicBezier.Basic,
         module Geom2D.CubicBezier.Approximate,

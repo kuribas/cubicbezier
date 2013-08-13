@@ -2,7 +2,6 @@ module Geom2D.CubicBezier.Outline where
 import Geom2D
 import Geom2D.CubicBezier.Basic
 import Geom2D.CubicBezier.Approximate
-import Data.List
 
 data Side = LeftSide | RightSide
 

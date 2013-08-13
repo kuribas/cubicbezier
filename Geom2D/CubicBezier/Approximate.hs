@@ -5,21 +5,21 @@ import Geom2D
 import Geom2D.CubicBezier.Numeric
 import Geom2D.CubicBezier.Basic
 import Data.List
+import Data.Maybe
 
 -- | @approximateCurve b pts@ finds the least squares fit of a bezier
--- curve to the points @pts@.  The first and last control point
--- are the same as the curve @b@, and have tangents colinear with @b@.
+-- curve to the points @pts@.  The resulting bezier has the same first
+-- and last control point as the curve @b@, and have tangents colinear with @b@.
 approximateCurve :: CubicBezier -> [Point] -> CubicBezier
 approximateCurve curve@(CubicBezier p1 _ _ p4) pts =
   approximateCurveWithParams curve pts (approximateParams p1 p4 pts) 
 
--- | Similar to approximateCurve, but also takes an initial estimation of the
--- parameters closest to the points, to speed up convergence.
+-- | Like approximateCurve, but also takes an initial guess of the
+-- parameters closest to the points.  This might be faster if a good
+-- guess can be made.
 approximateCurveWithParams :: CubicBezier -> [Point] -> [Double] -> CubicBezier
-approximateCurveWithParams curve@(CubicBezier p1 p2 p3 p4) pts ts =
-  case approximateCurve' curve pts ts 40 1e-8 of
-    Nothing -> curve
-    Just newCurve -> newCurve 
+approximateCurveWithParams curve pts ts =
+  fromMaybe curve (approximateCurve' curve pts ts 40 1e-8)
 
 -- find the least squares between the points p_i and B(t_i) for
 -- bezier curve B, where pts contains the points p_i and ts
@@ -31,6 +31,7 @@ approximateCurveWithParams curve@(CubicBezier p1 p2 p3 p4) pts ts =
 -- minimizing (sum |B(t_i) - p_i|^2) gives a linear equation
 -- with two unknown values (alpha1 and alpha2), which can be
 -- solved easily
+leastSquares :: CubicBezier -> [Point] -> [Double] -> Maybe CubicBezier
 leastSquares (CubicBezier (Point p1x p1y) (Point p2x p2y) (Point p3x p3y) (Point p4x p4y)) pts ts = let
   calcParams t (Point px py)  = let
     t2 = t * t; t3 = t2 * t
@@ -57,7 +58,8 @@ leastSquares (CubicBezier (Point p1x p1y) (Point p2x p2y) (Point p3x p3y) (Point
 -- calculate the least Squares bezier curve by choosing approximate values
 -- of t, and iterating again with an improved estimate of t, by taking the
 -- the values of t for which the points are closest to the curve
-approximateCurve' curve@(CubicBezier p1 p2 p3 p4) pts ts maxiter eps = do
+approximateCurve' :: CubicBezier -> [Point] -> [Double] -> Int -> Double -> Maybe CubicBezier
+approximateCurve' curve pts ts maxiter eps = do
   newCurve <- leastSquares curve pts ts
   let deltaTs = zipWith (calcDeltaT newCurve) pts ts
       ts' = map (max 0 . min 1) $ zipWith (-) ts deltaTs
@@ -79,6 +81,7 @@ approximateCurve' curve@(CubicBezier p1 p2 p3 p4) pts ts maxiter eps = do
 -- Only do this if it appears to converge for all values of t
 -- If the value of t changes too much keep the old value.
 -- This improves the convergence by a factor of about 10
+interpolateTs :: [Double] -> [Double] -> [Double] -> [Double] -> [Double]
 interpolateTs ts ts' deltaTs deltaTs' =
   map (max 0 . min 1) (
     if all id $ zipWith (\dT dT' -> dT * dT' > 0 && dT' / dT < 1) deltaTs deltaTs'
@@ -103,6 +106,6 @@ approximateParams start end pts = let
 -- using more iterations doesn't appear to give an improvement
 -- See Curve Fitting with Piecewise Parametric Cubics by Stone & Plass
 calcDeltaT curve (Point ptx pty) t = let
-  [(Point bezx bezy), (Point dbezx dbezy), (Point ddbezx ddbezy), _] = evalBezierDerivs curve t
+  [Point bezx bezy, Point dbezx dbezy, Point ddbezx ddbezy, _] = evalBezierDerivs curve t
   in ((bezx - ptx) * dbezx + (bezy - pty) * dbezy) /
      (dbezx * dbezx + dbezy * dbezy + (bezx - ptx) * ddbezx + (bezy - pty) * ddbezy)

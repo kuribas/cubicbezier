@@ -1,4 +1,4 @@
--- | some general 
+-- | Basic 2 dimensional geometry functions.
 
 module Geom2D where
 
