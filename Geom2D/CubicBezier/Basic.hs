@@ -33,8 +33,10 @@ evalBezier b =
 evalBezierDeriv :: CubicBezier -> Double -> (Point, Point)
 evalBezierDeriv b =
   let (px, py) = bezierToPoly b
+      dpx = polyDeriv px
+      dpy = polyDeriv py
   in \t -> (Point (evalPoly px t) (evalPoly py t),
-            Point (evalPoly (polyDeriv px) t) (evalPoly (polyDeriv py) t))
+            Point (evalPoly dpx t) (evalPoly dpy t))
 
 -- | Calculate a value and all derivatives on the curve.
 evalBezierDerivs :: CubicBezier -> Double -> [Point]
