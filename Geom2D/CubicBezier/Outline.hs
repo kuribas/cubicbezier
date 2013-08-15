@@ -3,26 +3,27 @@ import Geom2D
 import Geom2D.CubicBezier.Basic
 import Geom2D.CubicBezier.Approximate
 
-data Side = LeftSide | RightSide
+offsetPoint :: Double -> Point -> Point -> Point
+offsetPoint dist start tangent =
+  addVector start $
+  rotateVector90Left $ scaleVector dist $ unitVector tangent
 
-offsetPoint dist LeftSide start tangent =
-  addVector start
-  (rotateVector90Left $ scaleVector dist $ unitVector tangent)
-
-offsetPoint dist RightSide start tangent =
-  addVector start
-  (rotateVector90Right $ scaleVector dist $ unitVector tangent)
-
-bezierOffsetPoint cb side dist t =
-  uncurry (offsetPoint dist side) $
+bezierOffsetPoint :: CubicBezier -> Double -> Double -> Point
+bezierOffsetPoint cb dist t =
+  uncurry (offsetPoint dist) $
   evalBezierDeriv cb t
 
-bezierOffset cb@(CubicBezier p1 p2 p3 p4) side dist =
+-- Approximate the bezier curve offset by dist.  A positive value
+-- means to the left, a negative to the right.
+approximateOffset :: CubicBezier -> Double -> (CubicBezier, Double, Double)
+approximateOffset cb@(CubicBezier p1 p2 p3 p4) dist =
   approximateCurveWithParams offsetCb points ts
-  where offsetCb = CubicBezier
-                   (offsetPoint dist side p1 (subVector p2 p1))
-                   (offsetPoint dist side p2 (subVector p2 p1))
-                   (offsetPoint dist side p3 (subVector p4 p3))
-                   (offsetPoint dist side p4 (subVector p4 p3))
-        points = map (bezierOffsetPoint cb side dist) ts
+  where tan1 = subVector p2 p1
+        tan2 = subVector p4 p3
+        offsetCb = CubicBezier
+                   (offsetPoint dist p1 tan1)
+                   (offsetPoint dist p2 tan1)
+                   (offsetPoint dist p3 tan2)
+                   (offsetPoint dist p4 tan2)
+        points = map (bezierOffsetPoint cb dist) ts
         ts = [0.1,0.2..0.9]
