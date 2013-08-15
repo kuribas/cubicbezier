@@ -41,26 +41,25 @@ curvatureExtremum b =
      then Nothing -- we cannot use the root finder
      else Just $ findRoot curvDeriv 1e-8 0 1
 
-if' a b c = if a then b else c
-
 -- | Find points on the curve that have a certain radius of curvature.
--- The curve shouldn't have inflection points.  This function may not
--- find all points when there are more than two such points.
+-- 0 and 1 are excluded.  The curve shouldn't have inflection points.
+-- This function may not find all points when there are more than two
+-- such points.
 findRadius b d = let
   bd = evalBezierDerivs b
   radiusSquare t =
     let (_: Point x' y': Point x'' y'': _ ) = bd t
     in (x'^2 + y'^2)^3 - (d*(x'*y'' - y'*x''))^2
 
-  radiusBetween t1 t2 =
-    let r1 = radiusOfCurvature b t1
-        r2 = radiusOfCurvature b t2
-    in if' (r1 == d) [r1] $
-       if' (r2 == d) [r2] $
-       if' ((r1 * r2 >= 0) &&
-            (if r1 < r2 then r1 < d && d < r2 else r2 < d && d < r1))
-            [findRoot radiusSquare 1e-8 t1 t2]
-       []
+  r0 = radiusOfCurvature b 0
+  r1 = radiusOfCurvature b 1
+  radiusBetween t1 r1 t2 r2 =
+    [findRoot radiusSquare 1e-8 t1 t2 |
+     (r1 * r2 >= 0) &&  -- same sign
+     ((r1 < d && d < r2) || (r2 < d && d < r1))] -- in interval
+
   in case curvatureExtremum b of
-    Nothing -> radiusBetween 0 1
-    Just ex -> radiusBetween 0 ex ++ radiusBetween ex 1
+    Nothing -> radiusBetween 0 r0 1 r1
+    Just ex -> if rex == d then [ex]
+               else radiusBetween 0 r0 ex rex ++ radiusBetween ex rex 1 r1
+      where rex = radiusOfCurvature b ex
