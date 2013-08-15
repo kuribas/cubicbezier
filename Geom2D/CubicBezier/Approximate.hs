@@ -10,16 +10,24 @@ import Data.Maybe
 -- | @approximateCurve b pts@ finds the least squares fit of a bezier
 -- curve to the points @pts@.  The resulting bezier has the same first
 -- and last control point as the curve @b@, and have tangents colinear with @b@.
-approximateCurve :: CubicBezier -> [Point] -> CubicBezier
+-- return the curve, the parameter with maximum error, and maximum error.
+
+approximateCurve :: CubicBezier -> [Point] -> (CubicBezier, Double, Double)
 approximateCurve curve@(CubicBezier p1 _ _ p4) pts =
   approximateCurveWithParams curve pts (approximateParams p1 p4 pts) 
 
 -- | Like approximateCurve, but also takes an initial guess of the
 -- parameters closest to the points.  This might be faster if a good
 -- guess can be made.
-approximateCurveWithParams :: CubicBezier -> [Point] -> [Double] -> CubicBezier
+
+approximateCurveWithParams :: CubicBezier -> [Point] -> [Double] -> (CubicBezier, Double, Double)
 approximateCurveWithParams curve pts ts =
-  fromMaybe curve (approximateCurve' curve pts ts 40 1e-8)
+  let (c, newTs) = fromMaybe (curve, ts) $
+                   approximateCurve' curve pts ts 40 1e-8
+      curvePts = map (evalBezier c) newTs
+      distances = zipWith vectorDistance pts curvePts
+      (t, maxError) = maximumBy (\x y -> compare (snd x) (snd y)) (zip ts distances)
+  in (c, t, maxError)
 
 -- find the least squares between the points p_i and B(t_i) for
 -- bezier curve B, where pts contains the points p_i and ts
@@ -58,7 +66,7 @@ leastSquares (CubicBezier (Point p1x p1y) (Point p2x p2y) (Point p3x p3y) (Point
 -- calculate the least Squares bezier curve by choosing approximate values
 -- of t, and iterating again with an improved estimate of t, by taking the
 -- the values of t for which the points are closest to the curve
-approximateCurve' :: CubicBezier -> [Point] -> [Double] -> Int -> Double -> Maybe CubicBezier
+
 approximateCurve' curve pts ts maxiter eps = do
   newCurve <- leastSquares curve pts ts
   let deltaTs = zipWith (calcDeltaT newCurve) pts ts
@@ -66,10 +74,10 @@ approximateCurve' curve pts ts maxiter eps = do
   newCurve <- leastSquares curve pts ts'
   let deltaTs' = zipWith (calcDeltaT newCurve) pts ts'
       newTs = interpolateTs ts ts' deltaTs deltaTs'
-  if (maxiter < 1 || all ((< eps) . abs) deltaTs')
-    then (leastSquares curve pts newTs)
+  if maxiter < 1 || all ((< eps) . abs) deltaTs'
+    then do c <- leastSquares curve pts newTs
+            return (c, newTs)
     else approximateCurve' curve pts newTs (maxiter - 1) eps
-
 
 -- improve convergence by making a better estimate for t
 -- it is based on the observation that the ratio  
