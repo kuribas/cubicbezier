@@ -4,6 +4,7 @@ module Geom2D.CubicBezier.Approximate (
 import Geom2D
 import Geom2D.CubicBezier.Numeric
 import Geom2D.CubicBezier.Basic
+import Data.Function
 import Data.List
 import Data.Maybe
 
@@ -26,7 +27,7 @@ approximateCurveWithParams curve pts ts =
                    approximateCurve' curve pts ts 40 1e-8
       curvePts = map (evalBezier c) newTs
       distances = zipWith vectorDistance pts curvePts
-      (t, maxError) = maximumBy (\x y -> compare (snd x) (snd y)) (zip ts distances)
+      (t, maxError) = maximumBy (compare `on` snd) (zip ts distances)
   in (c, t, maxError)
 
 -- find the least squares between the points p_i and B(t_i) for

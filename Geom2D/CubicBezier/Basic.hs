@@ -3,8 +3,12 @@ import Geom2D
 import Geom2D.CubicBezier.Numeric
 import Math.Polynomial
 
-data CubicBezier = CubicBezier Point Point Point Point
-                   deriving Show
+data CubicBezier = CubicBezier {
+  bezierC0 :: Point,
+  bezierC1 :: Point,
+  bezierC2 :: Point,
+  bezierC3 :: Point}
+                 deriving Show
 
 -- | Return True if the param lies on the curve, iff it's in the interval @[0, 1]@.
 bezierParam :: Double -> Bool
@@ -74,3 +78,13 @@ bezierVert = findBezierTangent (Point 0 1)
 findBezierInflection :: CubicBezier -> [Double]
 findBezierInflection (CubicBezier (Point x0 y0) (Point x1 y1) (Point x2 y2) (Point x3 y3)) = undefined
 
+-- | Split a bezier curve into two curves.
+splitBezier :: CubicBezier -> Double -> (CubicBezier, CubicBezier)
+splitBezier (CubicBezier a b c d) t =
+  let ab = interpolateVector a b t
+      bc = interpolateVector b c t
+      cd = interpolateVector c d t
+      abbc = interpolateVector ab bc t
+      bccd = interpolateVector bc cd t
+      mid = interpolateVector abbc bccd t
+  in (CubicBezier a ab abbc mid, CubicBezier mid bccd cd d)

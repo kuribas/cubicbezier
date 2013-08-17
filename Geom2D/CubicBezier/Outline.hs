@@ -5,8 +5,7 @@ import Geom2D.CubicBezier.Approximate
 
 offsetPoint :: Double -> Point -> Point -> Point
 offsetPoint dist start tangent =
-  addVector start $
-  rotateVector90Left $ scaleVector dist $ unitVector tangent
+  start ^+^ (rotateVector90Left $ dist *^ normVector tangent)
 
 bezierOffsetPoint :: CubicBezier -> Double -> Double -> Point
 bezierOffsetPoint cb dist t =
@@ -18,8 +17,8 @@ bezierOffsetPoint cb dist t =
 approximateOffset :: CubicBezier -> Double -> (CubicBezier, Double, Double)
 approximateOffset cb@(CubicBezier p1 p2 p3 p4) dist =
   approximateCurveWithParams offsetCb points ts
-  where tan1 = subVector p2 p1
-        tan2 = subVector p4 p3
+  where tan1 = p2 ^-^ p1
+        tan2 = p4 ^-^ p3
         offsetCb = CubicBezier
                    (offsetPoint dist p1 tan1)
                    (offsetPoint dist p2 tan1)
