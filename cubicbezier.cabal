@@ -23,4 +23,4 @@ Library
     Geom2D.CubicBezier.Outline
     Geom2D.CubicBezier.Numeric
     Geom2D.CubicBezier.Curvature
-
+    Geom2D.CubicBezier.Intersection
