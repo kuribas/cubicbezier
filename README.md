@@ -5,15 +5,18 @@ Haskell library for manipulating cubic bezier curves.  The original goal
 is to support typography, but it may be useful for general graphics.
 
 Features implemented:
- * finding least squares approximation of a curve through some points
+
+ * least squares approximation of a curve through some points
  * finding tangents parallel to a vector
  * evaluating bezier curves and derivatives
- * finding curvature and radius of curvature
- * finding intersections between two curves
+ * curvature and radius of curvature
+ * intersections between two curves
 
 Features todo:
 
- * approximating an outline
+ * self intersections
+ * finding inflection points and cusps
+ * creating an approximate outline for a curve
  * creating paths from meta paths (as in D.E.Knuth's _metafont_)
  * adding and subtracting closed paths
  * removing overlap from paths
