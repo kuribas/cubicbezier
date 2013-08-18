@@ -133,8 +133,9 @@ bezierClip p@(CubicBezier p0 p1 p2 p3) q@(CubicBezier q0 q1 q2 q3)
     new_tmin = tmax * chop_tmin + tmin * (1 - chop_tmin)
     new_tmax = tmax * chop_tmax + tmin * (1 - chop_tmax)
 
--- | Find the intersections between two Bezier curves to within tolerance eps.
-bezierIntersection p q eps = bezierClip p q 0 1 0 1 0 eps False
+-- | Find the intersections between two Bezier curves within given
+-- tolerance, using the Bezier Clip algorithm. Returns the parameters
+-- for both curves.
 
-b1 = CubicBezier (Point 1 1) (Point 2 4) (Point 3 4) (Point 4 3)
-b2 = CubicBezier (Point 3 5) (Point 3 6) (Point 0 1) (Point 3 1)
+bezierIntersection :: CubicBezier -> CubicBezier -> Double -> [(Double, Double)]
+bezierIntersection p q eps = bezierClip p q 0 1 0 1 0 eps False

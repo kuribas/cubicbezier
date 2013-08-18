@@ -14,9 +14,9 @@ bezierOffsetPoint cb dist t =
 
 -- Approximate the bezier curve offset by dist.  A positive value
 -- means to the left, a negative to the right.
-approximateOffset :: CubicBezier -> Double -> (CubicBezier, Double, Double)
-approximateOffset cb@(CubicBezier p1 p2 p3 p4) dist =
-  approximateCurveWithParams offsetCb points ts
+approximateOffset :: CubicBezier -> Double -> Double -> (CubicBezier, Double, Double)
+approximateOffset cb@(CubicBezier p1 p2 p3 p4) dist eps =
+  approximateCurveWithParams offsetCb points ts eps
   where tan1 = p2 ^-^ p1
         tan2 = p4 ^-^ p3
         offsetCb = CubicBezier
