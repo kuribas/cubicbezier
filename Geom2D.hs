@@ -7,7 +7,10 @@ infixl 7 *^, ^*
 data Point = Point {
   pointX :: Double,
   pointY :: Double}
-           deriving Show
+
+instance Show Point where
+  show (Point x y) =
+    "Point " ++ show x ++ " " ++ show y
 
 data Transform = Transform {
   xformX1 :: Double,

@@ -8,23 +8,24 @@ import Data.Function
 import Data.List
 import Data.Maybe
 
--- | @approximateCurve b pts@ finds the least squares fit of a bezier
+-- | @approximateCurve b pts eps@ finds the least squares fit of a bezier
 -- curve to the points @pts@.  The resulting bezier has the same first
 -- and last control point as the curve @b@, and have tangents colinear with @b@.
 -- return the curve, the parameter with maximum error, and maximum error.
+-- Calculate to withing eps tolerance.
 
-approximateCurve :: CubicBezier -> [Point] -> (CubicBezier, Double, Double)
-approximateCurve curve@(CubicBezier p1 _ _ p4) pts =
-  approximateCurveWithParams curve pts (approximateParams p1 p4 pts) 
+approximateCurve :: CubicBezier -> [Point] -> Double -> (CubicBezier, Double, Double)
+approximateCurve curve@(CubicBezier p1 _ _ p4) pts eps =
+  approximateCurveWithParams curve pts (approximateParams p1 p4 pts) eps
 
 -- | Like approximateCurve, but also takes an initial guess of the
 -- parameters closest to the points.  This might be faster if a good
 -- guess can be made.
 
-approximateCurveWithParams :: CubicBezier -> [Point] -> [Double] -> (CubicBezier, Double, Double)
-approximateCurveWithParams curve pts ts =
+approximateCurveWithParams :: CubicBezier -> [Point] -> [Double] -> Double -> (CubicBezier, Double, Double)
+approximateCurveWithParams curve pts ts eps =
   let (c, newTs) = fromMaybe (curve, ts) $
-                   approximateCurve' curve pts ts 40 1e-8
+                   approximateCurve' curve pts ts 40 eps
       curvePts = map (evalBezier c) newTs
       distances = zipWith vectorDistance pts curvePts
       (t, maxError) = maximumBy (compare `on` snd) (zip ts distances)

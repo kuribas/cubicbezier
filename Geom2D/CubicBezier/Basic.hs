@@ -7,8 +7,8 @@ data CubicBezier = CubicBezier {
   bezierC0 :: Point,
   bezierC1 :: Point,
   bezierC2 :: Point,
-  bezierC3 :: Point}
-                 deriving Show
+  bezierC3 :: Point} deriving Show
+
 
 -- | Return True if the param lies on the curve, iff it's in the interval @[0, 1]@.
 bezierParam :: Double -> Bool
