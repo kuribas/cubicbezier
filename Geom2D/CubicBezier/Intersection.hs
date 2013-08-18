@@ -1,6 +1,6 @@
 -- curve intersection using bezier clipping.
 module Geom2D.CubicBezier.Intersection
-       -- (bezierIntersection)
+       (bezierIntersection)
        where
 
 import Geom2D
@@ -108,8 +108,10 @@ bezierClip p@(CubicBezier p0 p1 p2 p3) q@(CubicBezier q0 q1 q2 q3)
   -- within tolerance      
   | max (umax - umin) (new_tmax - new_tmin) < eps =
     if reverse
-    then [(q, p, umin, umax, new_tmin, new_tmax)]
-    else [(p, q, new_tmin, new_tmax, umin, umax)]
+    then [ (umin + (umax-umin)/2,
+            new_tmin + (new_tmax-new_tmin)/2) ]
+    else [ (new_tmin + (new_tmax-new_tmin)/2,
+            umin + (umax-umin)/2) ]
 
   -- iterate with the curves reversed.
   | otherwise =
@@ -126,8 +128,7 @@ bezierClip p@(CubicBezier p0 p1 p2 p3) q@(CubicBezier q0 q1 q2 q3)
     chop_interval = chopHull dmin dmax $
                     map d [p0, p1, p2, p3]
     Just (chop_tmin, chop_tmax) = chop_interval
-    newP = snd $ flip splitBezier chop_tmin $
-           fst $ splitBezier p chop_tmax
+    newP = bezierSubsegment p chop_tmin chop_tmax
     newClip = chop_tmax - chop_tmin
     new_tmin = tmax * chop_tmin + tmin * (1 - chop_tmin)
     new_tmax = tmax * chop_tmax + tmin * (1 - chop_tmax)

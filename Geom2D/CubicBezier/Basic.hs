@@ -53,7 +53,6 @@ evalBezierDerivs b =
 
 -- Use the formula tx * B'y(t) - ty * B'x(t) = 0 where
 -- B'x is the x value of the derivative of the Bezier curve.
-
 findBezierTangent :: Point -> CubicBezier -> [Double]
 findBezierTangent (Point tx ty) (CubicBezier (Point x0 y0) (Point x1 y1) (Point x2 y2) (Point x3 y3)) = 
   filter bezierParam $ quadraticRoot a b c
@@ -88,3 +87,22 @@ splitBezier (CubicBezier a b c d) t =
       bccd = interpolateVector bc cd t
       mid = interpolateVector abbc bccd t
   in (CubicBezier a ab abbc mid, CubicBezier mid bccd cd d)
+
+-- | Return the subsegment between the two parameters.
+bezierSubsegment :: CubicBezier -> Double -> Double -> CubicBezier
+bezierSubsegment b t1 t2 
+  | t1 > t2   = bezierSubsegment b t2 t1
+  | otherwise = snd $ flip splitBezier (t1/t2) $
+                fst $ splitBezier b t2
+
+-- | Split a bezier curve into a list of beziers
+-- The parameters should be in ascending order or
+-- the result is unpredictable.
+splitBezierN :: CubicBezier -> [Double] -> [CubicBezier]
+splitBezierN b [] = [b]
+splitBezierN b [t] = [a, b] where
+  (a, b) = splitBezier b t
+splitBezierN b (t:u:rest) =
+  bezierSubsegment b 0 t :
+  bezierSubsegment b t u :
+  tail (splitBezierN b $ u:rest)
