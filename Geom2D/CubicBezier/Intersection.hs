@@ -66,6 +66,8 @@ testAbove dmax (p:q:rest)
 intersectPt d (Point x1 y1) (Point x2 y2) =
   x1 + (d  - y1) * (x2 - x1) / (y2 - y1)
 
+-- make a hull and test over which interval the
+-- curve is garuanteed to lie inside the fat line
 chopHull dmin dmax ds = do
   let (upper, lower) = makeHull ds
   left_t <- testBelow dmin upper $

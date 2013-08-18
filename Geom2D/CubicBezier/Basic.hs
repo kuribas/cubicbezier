@@ -12,7 +12,7 @@ data CubicBezier = CubicBezier {
 
 -- | Return True if the param lies on the curve, iff it's in the interval @[0, 1]@.
 bezierParam :: Double -> Bool
-bezierParam t = t >= 0 || t <= 1
+bezierParam t = t >= 0 && t <= 1
 
 -- | Give the polynomial from 1D bezier parameters.
 bezierToPoly1D :: Double -> Double -> Double -> Double -> Poly Double
@@ -75,8 +75,19 @@ bezierVert = findBezierTangent (Point 0 1)
 -- with B'x(t) the x value of the first derivative at t,
 -- B''y(t) the y value of the second derivative at t
 findBezierInflection :: CubicBezier -> [Double]
-findBezierInflection (CubicBezier (Point x0 y0) (Point x1 y1) (Point x2 y2) (Point x3 y3)) = undefined
-
+findBezierInflection (CubicBezier (Point x0 y0) (Point x1 y1) (Point x2 y2) (Point x3 y3)) =
+  filter bezierParam $ quadraticRoot a b c
+    where
+      ax = x1 - x0
+      bx = x3 - x1 - ax
+      cx = x3 - x2 - ax - 2*bx
+      ay = y1 - y0
+      by = y2 - y1 - ay
+      cy = y3 - y2 - ay - 2*by
+      a = bx*cy - by*cx
+      b = ax*cy - ay*cx
+      c = ax*by - ay*bx
+                                                                                             
 -- | Split a bezier curve into two curves.
 splitBezier :: CubicBezier -> Double -> (CubicBezier, CubicBezier)
 splitBezier (CubicBezier a b c d) t =

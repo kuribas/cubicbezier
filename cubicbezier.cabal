@@ -14,7 +14,7 @@ source-repository head
   location:	https://github.com/kuribas/cubicbezier
 
 Library
-  Build-depends: base >= 3, polynomial > 0.5, hmatrix >= 0.15
+  Build-depends: base >= 3, polynomial > 0.5, roots >= 0.1.1.2
   Exposed-Modules:
     Geom2D
     Geom2D.CubicBezier

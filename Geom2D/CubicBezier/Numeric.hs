@@ -1,8 +1,9 @@
 -- | Some numerical computations used by the cubic bezier functions
 module Geom2D.CubicBezier.Numeric where
-import Numeric.GSL.Root
+import Math.Root.Finder.Brent
 
--- | Find the real roots of a quadratic equation.  It will return one, two or zero roots.
+-- | @quadraticRoot a b c@ find the real roots of the quadratic equation
+-- @a x^2 + b x + c = 0@.  It will return one, two or zero roots.
 quadraticRoot :: Double -> Double -> Double -> [Double]
 quadraticRoot a b c = result where
   d = b*b - 4*a*c
@@ -25,14 +26,17 @@ solveLinear2x2 a b c d e f =
               _ -> Just ((c * e - b * f) / det, (a * f - c * d)  / det)
   where det = d * b - a * e
 
--- | Find the root of a function numerically.  The root should cross zero only once
--- in the interval, so the sign at both estimations should be opposite.
+-- | Find the root of a function numerically.  This function may fail if
+-- both estimations don't have opposite sign.
 
--- use deckers method because it guarantees to converge
--- and has good convergence
+-- use deckers method because it guarantees to converge and has good
+-- convergence.
 findRoot :: (Double -> Double) -- ^ The function for which to find the root
             -> Double          -- ^ The desired accuracy
             -> Double          -- ^ A low estimation of the root
             -> Double          -- ^ A high estimation of the root
             -> Double          -- ^ The root found
-findRoot f xacc xl xu = fst $ uniRoot Brent xacc 50 f xl xu
+findRoot f xacc xl xu = case brent f xl xu xacc of
+  Right a -> a
+  Left _ -> error "rootfinder failed"
+
