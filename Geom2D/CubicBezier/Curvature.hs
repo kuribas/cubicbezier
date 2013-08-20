@@ -32,20 +32,20 @@ radiusOfCurvature b =
 -- the square of the curvature.
 -- Inflection points ((x'*y'' - y'*x'') == 0)
 -- are not handled.
-curvatureExtremum b =
+curvatureExtremum b eps =
   let bd = evalBezierDerivs b
       curvDeriv t = let
         (_: Point x' y': Point x'' y'': Point x''' y''': _) = bd t
         in (y'^2 + x'^2) * (x'*y''' - y'*x''') - 3 * (x'*y'' - y'*x'') * (y'*y'' + x'*x'')
   in if signum (curvDeriv 0) == signum (curvDeriv 1)
      then Nothing -- we cannot use the root finder
-     else Just $ findRoot curvDeriv 1e-8 0 1
+     else Just $ findRoot curvDeriv (bezierParamTolerance b eps) 0 1
 
 -- | Find points on the curve that have a certain radius of curvature.
 -- 0 and 1 are excluded.  The curve shouldn't have inflection points.
 -- This function may not find all points when there are more than two
 -- such points.
-findRadius b d = let
+findRadius b d eps = let
   bd = evalBezierDerivs b
   radiusSquare t =
     let (_: Point x' y': Point x'' y'': _ ) = bd t
@@ -53,12 +53,13 @@ findRadius b d = let
 
   r0 = radiusOfCurvature b 0
   r1 = radiusOfCurvature b 1
+  eps2 = bezierParamTolerance b eps
   radiusBetween t1 r1 t2 r2 =
-    [findRoot radiusSquare 1e-8 t1 t2 |
+    [findRoot radiusSquare eps2 t1 t2 |
      (r1 * r2 >= 0) &&  -- same sign
      ((r1 < d && d < r2) || (r2 < d && d < r1))] -- in interval
 
-  in case curvatureExtremum b of
+  in case curvatureExtremum b eps of
     Nothing -> radiusBetween 0 r0 1 r1
     Just ex -> if rex == d then [ex]
                else radiusBetween 0 r0 ex rex ++ radiusBetween ex rex 1 r1

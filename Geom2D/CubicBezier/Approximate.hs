@@ -25,9 +25,9 @@ approximateCurve curve@(CubicBezier p1 _ _ p4) pts eps =
 approximateCurveWithParams :: CubicBezier -> [Point] -> [Double] -> Double -> (CubicBezier, Double, Double)
 approximateCurveWithParams curve pts ts eps =
   let (c, newTs) = fromMaybe (curve, ts) $
-                   approximateCurve' curve pts ts 40 eps
-      curvePts = map (evalBezier c) newTs
-      distances = zipWith vectorDistance pts curvePts
+                   approximateCurve' curve pts ts 40 (bezierParamTolerance curve eps) 1
+      curvePts   = map (evalBezier c) newTs
+      distances  = zipWith vectorDistance pts curvePts
       (t, maxError) = maximumBy (compare `on` snd) (zip ts distances)
   in (c, t, maxError)
 
@@ -69,17 +69,20 @@ leastSquares (CubicBezier (Point p1x p1y) (Point p2x p2y) (Point p3x p3y) (Point
 -- of t, and iterating again with an improved estimate of t, by taking the
 -- the values of t for which the points are closest to the curve
 
-approximateCurve' curve pts ts maxiter eps = do
+approximateCurve' curve pts ts maxiter eps prevDeltaT = do
   newCurve <- leastSquares curve pts ts
   let deltaTs = zipWith (calcDeltaT newCurve) pts ts
       ts' = map (max 0 . min 1) $ zipWith (-) ts deltaTs
   newCurve <- leastSquares curve pts ts'
   let deltaTs' = zipWith (calcDeltaT newCurve) pts ts'
       newTs = interpolateTs ts ts' deltaTs deltaTs'
-  if maxiter < 1 || all ((< eps) . abs) deltaTs'
+      thisDeltaT = maximum $ map abs $ zipWith (-) newTs ts
+  if maxiter < 1 ||
+     -- Because convergence may be slow initially, make sure it is converging:
+     (prevDeltaT < eps/2  && thisDeltaT < prevDeltaT / 2)
     then do c <- leastSquares curve pts newTs
             return (c, newTs)
-    else approximateCurve' curve pts newTs (maxiter - 1) eps
+    else approximateCurve' curve pts newTs (maxiter - 1) eps thisDeltaT
 
 -- improve convergence by making a better estimate for t
 -- it is based on the observation that the ratio  

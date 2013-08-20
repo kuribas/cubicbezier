@@ -140,4 +140,6 @@ bezierClip p@(CubicBezier p0 p1 p2 p3) q@(CubicBezier q0 q1 q2 q3)
 -- for both curves.
 
 bezierIntersection :: CubicBezier -> CubicBezier -> Double -> [(Double, Double)]
-bezierIntersection p q eps = bezierClip p q 0 1 0 1 0 eps False
+bezierIntersection p q eps = bezierClip p q 0 1 0 1 0 eps' False
+  where
+    eps' = min (bezierParamTolerance p eps) (bezierParamTolerance q eps)
