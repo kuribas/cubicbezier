@@ -9,10 +9,22 @@ data CubicBezier = CubicBezier {
   bezierC2 :: Point,
   bezierC3 :: Point} deriving Show
 
-
 -- | Return True if the param lies on the curve, iff it's in the interval @[0, 1]@.
 bezierParam :: Double -> Bool
 bezierParam t = t >= 0 && t <= 1
+
+-- | Convert a tolerance from the codomain to the domain of the bezier curve.
+-- Should be good enough, but may not hold for high very tolerance values.
+
+-- The magnification of error from the domain to the codomain of the
+-- curve approaches the length of the tangent for small errors.  We
+-- can use the maximum of the convex hull of the derivative, and double it to
+-- have some margin for larger values.
+bezierParamTolerance (CubicBezier p1 p2 p3 p4) eps = eps / maxDist
+  where 
+    maxDist = 4 * maximum [vectorDistance p1 p2,
+                           vectorDistance p2 p3,
+                           vectorDistance p3 p4]
 
 -- | Give the polynomial from 1D bezier parameters.
 bezierToPoly1D :: Double -> Double -> Double -> Double -> Poly Double
@@ -87,7 +99,14 @@ findBezierInflection (CubicBezier (Point x0 y0) (Point x1 y1) (Point x2 y2) (Poi
       a = bx*cy - by*cx
       b = ax*cy - ay*cx
       c = ax*by - ay*bx
-                                                                                             
+
+-- | Find the cusps of a bezier.
+
+-- find a cusp.  We look for points where the tangent is both horizontal
+-- and vertical, which is only true for the zero vector.
+findBezierCusp b = filter vertical $ bezierHoriz b
+  where vertical = (== 0) . pointY . snd . evalBezierDeriv b
+
 -- | Split a bezier curve into two curves.
 splitBezier :: CubicBezier -> Double -> (CubicBezier, CubicBezier)
 splitBezier (CubicBezier a b c d) t =
@@ -117,3 +136,4 @@ splitBezierN b (t:u:rest) =
   bezierSubsegment b 0 t :
   bezierSubsegment b t u :
   tail (splitBezierN b $ u:rest)
+
