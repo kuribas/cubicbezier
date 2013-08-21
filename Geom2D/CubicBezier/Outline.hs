@@ -37,7 +37,7 @@ approximateOffset cb@(CubicBezier p1 p2 p3 p4) dist tol =
 
 -- subdivide the original curve and approximate the offset until
 -- the maximum error is below tolerance
-offsetSegment :: CubicBezier -> Double -> Double -> [CubicBezier]
+offsetSegment :: Double -> Double -> CubicBezier -> [CubicBezier]
 offsetSegment dist tol cb
   | err <= tol = [cb_out]
   | otherwise     = offsetSegment dist tol cb_l ++
