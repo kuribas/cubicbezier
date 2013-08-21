@@ -78,14 +78,6 @@ chopHull dmin dmax ds = do
              testAbove dmax (reverse lower)
   Just (left_t, right_t)
 
-lineDistance (Point x1 y1) (Point x2 y2) = \(Point x y) -> a*x + b*y + c
-  where a = a' / d
-        b = b' / d
-        c = -(y1*b' + x1*a') / d
-        a' = y1 - y2
-        b' = x2 - x1
-        d = sqrt(a'^2 + b'^2)
-
 bezierClip p@(CubicBezier p0 p1 p2 p3) q@(CubicBezier q0 q1 q2 q3)
   tmin tmax umin umax prevClip eps reverse
 
@@ -120,7 +112,7 @@ bezierClip p@(CubicBezier p0 p1 p2 p3) q@(CubicBezier q0 q1 q2 q3)
       bezierClip q newP umin umax new_tmin new_tmax newClip eps (not reverse)
 
   where
-    d = lineDistance q0 q3
+    d = lineDistance (Line q0 q3)
     d1 = d q1
     d2 = d q2
     (dmin, dmax) | d1*d2 > 0 = (3/4 * minimum [0, d1, d2],

@@ -9,6 +9,11 @@ data CubicBezier = CubicBezier {
   bezierC2 :: Point,
   bezierC3 :: Point} deriving Show
 
+newtype Path = Path [PathSegment]
+    
+data PathSegment = LineSegment Line
+                 | BezierSegment CubicBezier
+
 -- | Return True if the param lies on the curve, iff it's in the interval @[0, 1]@.
 bezierParam :: Double -> Bool
 bezierParam t = t >= 0 && t <= 1

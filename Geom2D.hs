@@ -21,6 +21,23 @@ data Transform = Transform {
   xformY3 :: Double }
                deriving Show
 
+data Line = Line Point Point
+data Polygon = Polygon [Point]
+
+-- | Return the parameters (a, b, c) for the normalised equation
+-- of the line: @a*x + b*y + c = 0@.
+lineEquation (Line (Point x1 y1) (Point x2 y2)) = (a, b, c)
+  where a = a' / d
+        b = b' / d
+        c = -(y1*b' + x1*a') / d
+        a' = y1 - y2
+        b' = x2 - x1
+        d = sqrt(a'^2 + b'^2)
+
+-- | Return the the distance from a point to the line.
+lineDistance l = \(Point x y) -> a*x + b*y + c
+  where (a, b, c) = lineEquation l
+
 -- | The lenght of the vector.
 vectorMag :: Point -> Double
 vectorMag (Point x y) = sqrt(x*x + y*y)
