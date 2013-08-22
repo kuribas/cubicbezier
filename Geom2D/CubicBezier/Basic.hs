@@ -14,6 +14,10 @@ newtype Path = Path [PathSegment]
 data PathSegment = LineSegment Line
                  | BezierSegment CubicBezier
 
+instance AffineTransform CubicBezier where
+  transform t (CubicBezier c0 c1 c2 c3) =
+    CubicBezier (transform t c0) (transform t c1) (transform t c2) (transform t c3)
+
 -- | Return True if the param lies on the curve, iff it's in the interval @[0, 1]@.
 bezierParam :: Double -> Bool
 bezierParam t = t >= 0 && t <= 1
@@ -27,7 +31,7 @@ bezierParam t = t >= 0 && t <= 1
 -- have some margin for larger values.
 bezierParamTolerance (CubicBezier p1 p2 p3 p4) eps = eps / maxDist
   where 
-    maxDist = 4 * maximum [vectorDistance p1 p2,
+    maxDist = 6 * maximum [vectorDistance p1 p2,
                            vectorDistance p2 p3,
                            vectorDistance p3 p4]
 

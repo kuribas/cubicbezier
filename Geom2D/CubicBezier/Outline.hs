@@ -13,7 +13,7 @@ import Data.List
 
 offsetPoint :: Double -> Point -> Point -> Point
 offsetPoint dist start tangent =
-  start ^+^ (rotateVector90Left $ dist *^ normVector tangent)
+  start ^+^ (rotate90L $* (rotateVector90Left $ dist *^ normVector tangent))
 
 bezierOffsetPoint :: CubicBezier -> Double -> Double -> Point
 bezierOffsetPoint cb dist t =

@@ -1,4 +1,5 @@
 module Geom2D.CubicBezier.Curvature
+       (curvature, radiusOfCurvature, curvatureExtremum, findRadius)
 where
 import Geom2D
 import Geom2D.CubicBezier.Basic
@@ -6,21 +7,20 @@ import Geom2D.CubicBezier.Numeric
 import Data.Maybe
 
 -- | Curvature of the Bezier curve.
-curvature :: CubicBezier -> Double -> Double
-curvature b =
-  let bd = evalBezierDerivs b
-  in \t -> let
-    (_: Point x' y': Point x'' y'': _) = bd t
-    in (x' * y'' - y' * x'') / (x'^2 + y'^2)**1.5
+curvature b@(CubicBezier c0 c1 c2 c3) t
+  | t == 0 = curvature' b
+  | t == 1 = curvature' (CubicBezier c3 c2 c1 c0)
+  | otherwise = curvature' $ snd $ splitBezier b t
+
+curvature' b@(CubicBezier c0 c1 c2 c3) = 2/3 * b/a^3
+  where 
+    a = vectorDistance c1 c0
+    b = (c1^-^c0) `vectorCross` (c2^-^c1)
 
 -- | Radius of curvature of the Bezier curve.  This
 -- is the reciprocal of the curvature.
 radiusOfCurvature :: CubicBezier -> Double -> Double
-radiusOfCurvature b =
-  let bd = evalBezierDerivs b
-  in \t -> let
-    (_: Point x' y': Point x'' y'': _) = bd t
-    in (x'^2 + y'^2)**1.5 / (x' * y'' - y' * x'')
+radiusOfCurvature b t = 1 / curvature b t
 
 -- | Find a local maximum or minimum of the curvature
 -- on the bezier.  It may not return all solutions
