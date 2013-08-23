@@ -11,13 +11,14 @@ Features implemented:
  * evaluating bezier curves and derivatives
  * curvature and radius of curvature
  * intersections between two curves
-
+ * finding inflection points and cusps
+ * affine transformations on bezier curves
+ 
 Features todo:
 
  * self intersections
- * finding inflection points and cusps
  * creating an approximate outline for a curve
  * creating paths from meta paths (as in D.E.Knuth's _metafont_)
  * adding and subtracting closed paths
  * removing overlap from paths
- * affine transformations on bezier curves
+

@@ -1,6 +1,6 @@
 -- curve intersection using bezier clipping.
 module Geom2D.CubicBezier.Intersection
-       (bezierIntersection)
+       (bezierIntersection, bezierLineIntersections)
        where
 
 import Geom2D
@@ -60,7 +60,7 @@ testAbove dmax (p:q:rest)
   | pointY p < pointY q = Nothing
   | pointY q > dmax = testAbove dmax (q:rest)
   | otherwise = Just $ intersectPt dmax p q
-                
+
 -- find the x value where the line through the two points
 -- intersect the line y=d
 intersectPt d (Point x1 y1) (Point x2 y2) =
@@ -135,3 +135,44 @@ bezierIntersection :: CubicBezier -> CubicBezier -> Double -> [(Double, Double)]
 bezierIntersection p q eps = bezierClip p q 0 1 0 1 0 eps' False
   where
     eps' = min (bezierParamTolerance p eps) (bezierParamTolerance q eps)
+
+------------------------ Line intersection -------------------------------------
+-- Clipping a line uses a simplified version of the Bezier Clip algorithm,
+-- and uses the (thin) line itself instead of the fat line.
+
+-- clip a bezier curve at the X axis
+bezierClipLineX p@(CubicBezier p0 p1 p2 p3) tmin tmax prevClip eps
+  -- no intersection
+  | chop_interval == Nothing = []
+
+  -- not enough reduction, so split the curve in case we have
+  -- multiple intersections
+  | prevClip > 0.8 && newClip > 0.8 =
+    let (p1, p2) = splitBezier newP 0.5
+        half_t = new_tmin + (new_tmax - new_tmin) / 2
+    in bezierClipLineX p1 new_tmin half_t newClip eps ++
+       bezierClipLineX p2 half_t new_tmax newClip eps
+
+  -- within tolerance
+  | new_tmax - new_tmin < eps =
+      [new_tmin + (new_tmax-new_tmin)/2]
+
+      -- iterate
+  | otherwise =
+        bezierClipLineX newP new_tmin new_tmax newClip eps
+
+  where
+    chop_interval = chopHull 0 0 $ map pointY [p0, p1, p2, p3]
+    Just (chop_tmin, chop_tmax) = chop_interval
+    newP = bezierSubsegment p chop_tmin chop_tmax
+    newClip = chop_tmax - chop_tmin
+    new_tmin = tmax * chop_tmin + tmin * (1 - chop_tmin)
+    new_tmax = tmax * chop_tmax + tmin * (1 - chop_tmax)
+
+-- | Find the intersections of the curve with a line.
+
+-- Apply a transformation to the bezier that maps the line onto the
+-- X-axis.
+bezierLineIntersections :: CubicBezier -> Line -> Double -> [Double]
+bezierLineIntersections b (Line p q) eps = bezierClipLineX b' 0 1 1 $ bezierParamTolerance b eps
+  where b' = (fromJust $ inverse $ translate p $* rotateVec (q ^-^ p)) $* b

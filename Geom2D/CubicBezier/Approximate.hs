@@ -16,7 +16,7 @@ import Data.Maybe
 
 approximateCurve :: CubicBezier -> [Point] -> Double -> (CubicBezier, Double, Double)
 approximateCurve curve@(CubicBezier p1 _ _ p4) pts eps =
-  approximateCurveWithParams curve pts (approximateParams p1 p4 pts) eps
+  approximateCurveWithParams curve pts (approximateParams curve p1 p4 pts) eps
 
 -- | Like approximateCurve, but also takes an initial guess of the
 -- parameters closest to the points.  This might be faster if a good
@@ -105,12 +105,13 @@ interpolateTs ts ts' deltaTs deltaTs' =
 
 -- approximate t by calculating the distances between all points
 -- and dividing by the total sum
-approximateParams :: Point -> Point -> [Point] -> [Double]
-approximateParams start end pts = let
+approximateParams :: CubicBezier -> Point -> Point -> [Point] -> [Double]
+approximateParams cb start end pts = let
   segments = start : (pts ++ [end])
   dists = zipWith vectorDistance segments (tail segments)
   total = sum dists
-  in map (/ total) $ scanl1 (+) dists
+  improve p t = t - calcDeltaT cb p t
+  in zipWith improve pts $ map (/ total) $ scanl1 (+) dists
 
 -- find a value of t where B(t) is closer between the bezier curve and
 -- the point (ptx, pty), by solving f' = 0 where
