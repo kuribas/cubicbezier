@@ -35,6 +35,10 @@ bezierParamTolerance (CubicBezier p1 p2 p3 p4) eps = eps / maxDist
                            vectorDistance p2 p3,
                            vectorDistance p3 p4]
 
+-- | Reorient to the curve B(1-t).
+reorient :: CubicBezier -> CubicBezier
+reorient (CubicBezier p0 p1 p2 p3) = CubicBezier p3 p2 p1 p0 
+
 -- | Give the polynomial from 1D bezier parameters.
 bezierToPoly1D :: Double -> Double -> Double -> Double -> Poly Double
 bezierToPoly1D a b c d = poly BE [ d - a + 3*(b - c)

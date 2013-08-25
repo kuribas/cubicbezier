@@ -1,16 +1,18 @@
 module Geom2D.CubicBezier.Curvature
-       (curvature, radiusOfCurvature, curvatureExtremum, findRadius)
+       (curvature, radiusOfCurvature, curvatureExtrema, findRadius)
 where
 import Geom2D
 import Geom2D.CubicBezier.Basic
-import Geom2D.CubicBezier.Numeric
+import Geom2D.CubicBezier.Intersection
 import Data.Maybe
+import Data.List
 
 -- | Curvature of the Bezier curve.
-curvature b@(CubicBezier c0 c1 c2 c3) t
+curvature b t
   | t == 0 = curvature' b
-  | t == 1 = curvature' (CubicBezier c3 c2 c1 c0)
-  | otherwise = curvature' $ snd $ splitBezier b t
+  | t == 1 = curvature' $ reorient b
+  | t < 0.5 = curvature' $ snd $ splitBezier b t
+  | otherwise = curvature' $ reorient $ fst $ splitBezier b t
 
 curvature' b@(CubicBezier c0 c1 c2 c3) = 2/3 * b/a^3
   where 
@@ -22,45 +24,35 @@ curvature' b@(CubicBezier c0 c1 c2 c3) = 2/3 * b/a^3
 radiusOfCurvature :: CubicBezier -> Double -> Double
 radiusOfCurvature b t = 1 / curvature b t
 
--- | Find a local maximum or minimum of the curvature
--- on the bezier.  It may not return all solutions
--- when there are inflection points or multiple local
--- extrema.
+extrema (CubicBezier p0 p1 p2 p3) =
+  let bez = [p0, p1, p2, p3]
+      x' = genericDeriv $ map pointX bez
+      y' = genericDeriv $ map pointY bez
+      x'' = genericDeriv x'
+      y'' = genericDeriv y'
+      x''' = genericDeriv x''
+      y''' = genericDeriv y''
+  in -- (y'^2 + x'^2) * (x'*y''' - y'*x''') -
+     -- 3 * (x'*y'' - y'*x'') * (y'*y'' + x'*x'')
+   (y'~*y' ~+ x'~*x') ~* (x'~*y''' ~- y'~*x''') ~-
+   3 *~ (x'~*y'' ~- y'~*x'') ~* (y'~*y'' ~+ x'~*x'')
 
--- calculate the extrama of the curvature by
--- finding the root of the derivative of
--- the square of the curvature.
--- Inflection points ((x'*y'' - y'*x'') == 0)
--- are not handled.
-curvatureExtremum b eps =
-  let bd = evalBezierDerivs b
-      curvDeriv t = let
-        (_: Point x' y': Point x'' y'': Point x''' y''': _) = bd t
-        in (y'^2 + x'^2) * (x'*y''' - y'*x''') - 3 * (x'*y'' - y'*x'') * (y'*y'' + x'*x'')
-  in if signum (curvDeriv 0) == signum (curvDeriv 1)
-     then Nothing -- we cannot use the root finder
-     else Just $ findRoot curvDeriv (bezierParamTolerance b eps) 0 1
+-- | Find extrema of the curvature, but not inflection points.
+curvatureExtrema :: CubicBezier -> Double -> [Double]
+curvatureExtrema b eps = bezierFindRoot (extrema b) 0 1 $
+                         bezierParamTolerance b eps
+
+radiusSquareEq (CubicBezier p0 p1 p2 p3) d =
+  let bez = [p0, p1, p2, p3]
+      x' = genericDeriv $ map pointX bez
+      y' = genericDeriv $ map pointY bez
+      x'' = genericDeriv x'
+      y'' = genericDeriv y'
+      a =  x'~*x' ~+  y'~*y'
+      b =  x'~*y'' ~-  x''~*y'
+  in (a~*a~*a) ~- (d*d) *~ b~*b
 
 -- | Find points on the curve that have a certain radius of curvature.
--- 0 and 1 are excluded.  The curve shouldn't have inflection points.
--- This function may not find all points when there are more than two
--- such points.
-findRadius b d eps = let
-  bd = evalBezierDerivs b
-  radiusSquare t =
-    let (_: Point x' y': Point x'' y'': _ ) = bd t
-    in (x'^2 + y'^2)^3 - (d*(x'*y'' - y'*x''))^2
-
-  r0 = radiusOfCurvature b 0
-  r1 = radiusOfCurvature b 1
-  eps2 = bezierParamTolerance b eps
-  radiusBetween t1 r1 t2 r2 =
-    [findRoot radiusSquare eps2 t1 t2 |
-     (r1 * r2 >= 0) &&  -- same sign
-     ((r1 < d && d < r2) || (r2 < d && d < r1))] -- in interval
-
-  in case curvatureExtremum b eps of
-    Nothing -> radiusBetween 0 r0 1 r1
-    Just ex -> if rex == d then [ex]
-               else radiusBetween 0 r0 ex rex ++ radiusBetween ex rex 1 r1
-      where rex = radiusOfCurvature b ex
+findRadius :: CubicBezier -> Double -> Double -> [Double]
+findRadius b d eps = bezierFindRoot (radiusSquareEq b d) 0 1 $
+                     bezierParamTolerance b eps

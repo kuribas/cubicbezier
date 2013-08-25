@@ -2,7 +2,7 @@
 module Geom2D where
 
 infixl 6 ^+^, ^-^
-infixl 7 *^, ^*
+infixl 7 *^, ^*, ^/
 infixr 5 $*
 
 data Point = Point {
@@ -84,6 +84,10 @@ normVector p@(Point x y) = Point (x/l) (y/l)
 -- | Scale vector by constant.
 (*^) :: Double -> Point -> Point
 s *^ (Point x y) = Point (s*x) (s*y)
+
+-- | Scale vector by reciprocal of constant.
+(^/) :: Point -> Double -> Point
+(Point x y) ^/ s = Point (x/s) (y/s)
 
 -- | Scale vector by constant, with the arguments swapped.
 (^*) :: Point -> Double -> Point
