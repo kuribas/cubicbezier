@@ -1,7 +1,7 @@
 module Geom2D.CubicBezier.Basic where
 import Geom2D
 import Geom2D.CubicBezier.Numeric
-import Math.Polynomial
+import Math.BernsteinPoly
 
 data CubicBezier = CubicBezier {
   bezierC0 :: Point,
@@ -39,39 +39,29 @@ bezierParamTolerance (CubicBezier p1 p2 p3 p4) eps = eps / maxDist
 reorient :: CubicBezier -> CubicBezier
 reorient (CubicBezier p0 p1 p2 p3) = CubicBezier p3 p2 p1 p0 
 
--- | Give the polynomial from 1D bezier parameters.
-bezierToPoly1D :: Double -> Double -> Double -> Double -> Poly Double
-bezierToPoly1D a b c d = poly BE [ d - a + 3*(b - c)
-                                 , 3 * (a - 2*b + c)
-                                 , 3 * (b - a)
-                                 , a]
-
--- | Return a pair of polynomials from the bezier curve, one for each coordinate.
-bezierToPoly :: CubicBezier -> (Poly Double, Poly Double)
-bezierToPoly (CubicBezier (Point p1x p1y) (Point p2x p2y) (Point p3x p3y) (Point p4x p4y)) =
-  (bezierToPoly1D p1x p2x p3x p4x,
-   bezierToPoly1D p1y p2y p3y p4y)
+-- | Give the bernstein polynomial for each coordinate.
+bezierToBernstein (CubicBezier a b c d) = (listToBernstein $ map pointX coeffs,
+                                           listToBernstein $ map pointY coeffs)
+  where coeffs = [a, b, c, d]
 
 -- | Calculate a value on the curve.
 evalBezier :: CubicBezier -> Double -> Point
-evalBezier b =
-  let (px, py) = bezierToPoly b
-  in \t -> Point (evalPoly px t) (evalPoly py t)
+evalBezier b t = Point (bernsteinEval x t) (bernsteinEval y t)
+  where (x, y) = bezierToBernstein b
 
 -- | Calculate a value and the first derivative on the curve.
-evalBezierDeriv :: CubicBezier -> Double -> (Point, Point)
 evalBezierDeriv b =
-  let (px, py) = bezierToPoly b
-      dpx = polyDeriv px
-      dpy = polyDeriv py
-  in \t -> (Point (evalPoly px t) (evalPoly py t),
-            Point (evalPoly dpx t) (evalPoly dpy t))
+  let (px, py) = bezierToBernstein b
+      px' = bernsteinDeriv px
+      py' = bernsteinDeriv py
+  in \t -> (Point (bernsteinEval px t) (bernsteinEval py t),
+            Point (bernsteinEval px' t) (bernsteinEval py' t))
 
 -- | Calculate a value and all derivatives on the curve.
 evalBezierDerivs :: CubicBezier -> Double -> [Point]
-evalBezierDerivs b =
-  let (px, py) = bezierToPoly b
-  in \t -> zipWith Point (evalPolyDerivs px t) (evalPolyDerivs py t)
+evalBezierDerivs b t = zipWith Point (bernsteinEvalDerivs px t)
+                       (bernsteinEvalDerivs py t)
+  where (px, py) = bezierToBernstein b
 
 -- | @findBezierTangent p b@ finds the parameters where
 -- the tangent of the bezier curve @b@ has the same direction as vector p.
