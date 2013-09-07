@@ -1,10 +1,16 @@
 {-# LANGUAGE BangPatterns #-}
-module Geom2D.CubicBezier.Basic where
+module Geom2D.CubicBezier.Basic
+       (CubicBezier (..), PathJoin (..), Path (..), AffineTransform (..), 
+        bezierParam, bezierParamTolerance, reorient, bezierToBernstein,
+        evalBezier, evalBezierDeriv, evalBezierDerivs, findBezierTangent,
+        bezierHoriz, bezierVert, findBezierInflection, findBezierCusp,
+        arcLength, arcLengthParam, splitBezier, bezierSubsegment, splitBezierN,
+        colinear)
+       where
 import Geom2D
 import Geom2D.CubicBezier.Numeric
 import Math.BernsteinPoly
 import Numeric.Integration.TanhSinh
-import Debug.Trace
 
 data CubicBezier = CubicBezier {
   bezierC0 :: Point,
