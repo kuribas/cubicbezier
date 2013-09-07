@@ -6,6 +6,7 @@ Stability:	Unstable
 License:	GPL-2
 License-file:	LICENSE
 Author:		Kristof Bastiaensen
+Maintainer:	Kristof Bastiaensen
 Build-type:	Simple
 Cabal-version:	>=1.2
 
