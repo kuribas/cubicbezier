@@ -14,14 +14,7 @@ Cabal-version:	>=1.6
 Description:	This library supports efficient manipulating of 2D cubic bezier curves.  The original goal
   is to support typography, but it is useful for general graphics.  Supported features are:
   .
-  * evaluating bezier curves and derivatives
-  * affine transformations on bezier curves
-  * arclength and inverse arclength
-  * intersections between two curves
-  * intersection between a curve and a line
-  * curvature and radius of curvature
-  * finding tangents parallel to a vector
-  * finding inflection points and cusps
+  Evaluating bezier curves and derivatives, affine transformations on bezier curves, arclength and inverse arclength, intersections between two curves, intersection between a curve and a line, curvature and radius of curvature, finding tangents parallel to a vector, finding inflection points and cusps.
   .
   It also supports polynomial root finding with Bernstein polynomials.
   .
@@ -33,7 +26,7 @@ source-repository head
   location:	https://github.com/kuribas/cubicbezier
 
 Library
-  Build-depends: base >= 3, containers > 0.4, integration >= 0.1.1
+  Build-depends: base >= 3 && < 5, containers > 0.4, integration >= 0.1.1
   Exposed-Modules:
     Geom2D
     Geom2D.CubicBezier
