@@ -123,7 +123,7 @@ findBezierCusp :: CubicBezier -> [Double]
 findBezierCusp b = filter vertical $ bezierHoriz b
   where vertical = (== 0) . pointY . snd . evalBezierDeriv b
 
--- | Find the arclength of the bezier at the parameter, within given tolerance
+-- | @arcLength c t tol finds the arclength of the bezier c at t, within given tolerance tol.
 
 arcLength :: CubicBezier -> Double -> Double -> Double
 arcLength b@(CubicBezier c0 c1 c2 c3) t eps =
@@ -156,8 +156,8 @@ arcLengthEstimate b eps = (arclen, (estimate, ol))
     arclen | (abs(estL + estR - estimate) < eps) = estL + estR
            | otherwise = arcL + arcR
 
--- | Find the parameter where the curve has the given arclength.
--- within tolerance.
+-- | arcLengthParam c len tol finds the parameter where the curve c has the arclength len,
+-- within tolerance tol.
 arcLengthParam b len eps =
   arcLengthP b len ol (len/ol) 1 eps
   where ol = outline b
