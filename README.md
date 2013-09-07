@@ -11,6 +11,7 @@ Features implemented:
  * evaluating bezier curves and derivatives
  * curvature and radius of curvature
  * intersections between two curves
+ * intersections between a curve and a line
  * finding inflection points and cusps
  * affine transformations on bezier curves
  
