@@ -49,6 +49,7 @@ bernsteinSubsegment b t1 t2
         a' = zipWith (*) a (binCoeff la)
         b' = zipWith (*) b (binCoeff lb)
 
+degreeElevate' :: BernsteinPoly -> Int -> BernsteinPoly
 degreeElevate' b 0 = b
 degreeElevate' (BernsteinPoly lp p) times =
   degreeElevate' (BernsteinPoly (lp+1) (head p:inner p 1)) (times-1)
@@ -70,10 +71,10 @@ degreeElevate l times = degreeElevate' l times
 -- | Evaluate the bernstein polynomial.
 bernsteinEval :: BernsteinPoly -> Double -> Double
 bernsteinEval (BernsteinPoly lp p) t = foldl' addcoeff 0 $
-                                       zip3 ts (binCoeff (lp+1)) p
+                                       zip3 ts (binCoeff lp) p
   where ts = iterate (*t) 1
         u = 1-t
-        addcoeff a (t, d, b) = (a*u + b*t*d)
+        addcoeff a (s, d, b) = (a*u + b*s*d)
 
 -- | Evaluate the bernstein polynomial and its derivatives.
 bernsteinEvalDerivs :: BernsteinPoly -> Double -> [Double]
@@ -83,6 +84,7 @@ bernsteinEvalDerivs b t
                 bernsteinEvalDerivs (bernsteinDeriv b) t
 
 -- | Find the derivative of a bernstein polynomial.
+bernsteinDeriv :: BernsteinPoly -> BernsteinPoly
 bernsteinDeriv (BernsteinPoly 0 _) = zeroPoly
 bernsteinDeriv (BernsteinPoly lp p) =
   BernsteinPoly (lp-1) $

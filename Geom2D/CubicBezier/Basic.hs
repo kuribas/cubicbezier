@@ -1,7 +1,10 @@
+{-# LANGUAGE BangPatterns #-}
 module Geom2D.CubicBezier.Basic where
 import Geom2D
 import Geom2D.CubicBezier.Numeric
 import Math.BernsteinPoly
+import Numeric.Integration.TanhSinh
+import Debug.Trace
 
 data CubicBezier = CubicBezier {
   bezierC0 :: Point,
@@ -9,14 +12,14 @@ data CubicBezier = CubicBezier {
   bezierC2 :: Point,
   bezierC3 :: Point} deriving Show
 
-newtype Path = Path [PathSegment]
-    
-data PathSegment = LineSegment Line
-                 | BezierSegment CubicBezier
+data PathJoin = JoinLine | JoinCurve Point Point
+data Path = Path Point [(PathJoin, Point)]
 
 instance AffineTransform CubicBezier where
   transform t (CubicBezier c0 c1 c2 c3) =
     CubicBezier (transform t c0) (transform t c1) (transform t c2) (transform t c3)
+
+
 
 -- | Return True if the param lies on the curve, iff it's in the interval @[0, 1]@.
 bezierParam :: Double -> Bool
@@ -29,6 +32,7 @@ bezierParam t = t >= 0 && t <= 1
 -- curve approaches the length of the tangent for small errors.  We
 -- can use the maximum of the convex hull of the derivative, and double it to
 -- have some margin for larger values.
+bezierParamTolerance :: CubicBezier -> Double -> Double
 bezierParamTolerance (CubicBezier p1 p2 p3 p4) eps = eps / maxDist
   where 
     maxDist = 6 * maximum [vectorDistance p1 p2,
@@ -40,6 +44,7 @@ reorient :: CubicBezier -> CubicBezier
 reorient (CubicBezier p0 p1 p2 p3) = CubicBezier p3 p2 p1 p0 
 
 -- | Give the bernstein polynomial for each coordinate.
+bezierToBernstein :: CubicBezier -> (BernsteinPoly, BernsteinPoly)
 bezierToBernstein (CubicBezier a b c d) = (listToBernstein $ map pointX coeffs,
                                            listToBernstein $ map pointY coeffs)
   where coeffs = [a, b, c, d]
@@ -50,6 +55,7 @@ evalBezier b t = Point (bernsteinEval x t) (bernsteinEval y t)
   where (x, y) = bezierToBernstein b
 
 -- | Calculate a value and the first derivative on the curve.
+evalBezierDeriv :: CubicBezier -> Double -> (Point, Point)
 evalBezierDeriv b =
   let (px, py) = bezierToBernstein b
       px' = bernsteinDeriv px
@@ -72,9 +78,9 @@ findBezierTangent :: Point -> CubicBezier -> [Double]
 findBezierTangent (Point tx ty) (CubicBezier (Point x0 y0) (Point x1 y1) (Point x2 y2) (Point x3 y3)) = 
   filter bezierParam $ quadraticRoot a b c
     where
-      a = 3*(tx*((y3 - y0) + 3*(y1 - y2)) - ty*((x3 - x0) + 3*(x1 - x2)))
-      b = 6*(tx*((y2 + y0) - 2*y1) - ty*((x2 + x0) - 2*x1))
-      c = 3*(tx*(y1 - y0) - ty*(x1 - x0))
+      a = tx*((y3 - y0) + 3*(y1 - y2)) - ty*((x3 - x0) + 3*(x1 - x2))
+      b = 2*(tx*((y2 + y0) - 2*y1) - ty*((x2 + x0) - 2*x1))
+      c = tx*(y1 - y0) - ty*(x1 - x0)
 
 -- | Find the parameter where the bezier curve is horizontal.
 bezierHoriz :: CubicBezier -> [Double]
@@ -107,8 +113,56 @@ findBezierInflection (CubicBezier (Point x0 y0) (Point x1 y1) (Point x2 y2) (Poi
 
 -- find a cusp.  We look for points where the tangent is both horizontal
 -- and vertical, which is only true for the zero vector.
+findBezierCusp :: CubicBezier -> [Double]
 findBezierCusp b = filter vertical $ bezierHoriz b
   where vertical = (== 0) . pointY . snd . evalBezierDeriv b
+
+-- | Find the arclength of the bezier at the parameter, within given tolerance
+
+arcLength :: CubicBezier -> Double -> Double -> Double
+arcLength b@(CubicBezier c0 c1 c2 c3) t eps =
+  if eps / maximum [vectorDistance c0 c1,
+                    vectorDistance c1 c2,
+                    vectorDistance c2 c3] > 1e-10
+  then (signum t *) $ fst $
+       arcLengthEstimate (fst $ splitBezier b t) eps
+  else arcLengthQuad b t eps
+
+arcLengthQuad :: CubicBezier -> Double -> Double -> Double
+arcLengthQuad b t eps = result $ absolute eps $
+                        trap distDeriv 0 t
+  where distDeriv t' = vectorMag $ snd $ evalD t'
+        evalD = evalBezierDeriv b 
+
+outline (CubicBezier c0 c1 c2 c3) =
+  sum [vectorDistance c0 c1,
+       vectorDistance c1 c2,
+       vectorDistance c2 c3]
+
+arcLengthEstimate :: CubicBezier -> Double -> (Double, (Double, Double))
+arcLengthEstimate b eps = (arclen, (estimate, ol))
+  where
+    estimate = (4*(olL+olR) - ol) / 3
+    (bl, br) = splitBezier b 0.5
+    ol = outline b
+    (arcL, (estL, olL)) = arcLengthEstimate bl eps
+    (arcR, (estR, olR)) = arcLengthEstimate br eps
+    arclen | (abs(estL + estR - estimate) < eps) = estL + estR
+           | otherwise = arcL + arcR
+
+-- | Find the parameter where the curve has the given arclength.
+-- within tolerance.
+arcLengthParam b len eps =
+  arcLengthP b len ol (len/ol) 1 eps
+  where ol = outline b
+
+-- Use the Newton rootfinding method.  Start with large tolerance
+-- values, and decrease tolerance as we go closer to the root.
+arcLengthP !b !len !tot !t !dt !eps
+  | abs diff < eps = t - newDt
+  | otherwise = arcLengthP b len tot (t - newDt) newDt eps
+  where diff = arcLength b t (max (abs (dt*tot/50)) (eps/2)) - len
+        newDt = diff / vectorMag (snd $ evalBezierDeriv b t)
 
 -- | Split a bezier curve into two curves.
 splitBezier :: CubicBezier -> Double -> (CubicBezier, CubicBezier)
@@ -132,11 +186,17 @@ bezierSubsegment b t1 t2
 -- The parameters should be in ascending order or
 -- the result is unpredictable.
 splitBezierN :: CubicBezier -> [Double] -> [CubicBezier]
-splitBezierN b [] = [b]
-splitBezierN b [t] = [a, b] where
-  (a, b) = splitBezier b t
-splitBezierN b (t:u:rest) =
-  bezierSubsegment b 0 t :
-  bezierSubsegment b t u :
-  tail (splitBezierN b $ u:rest)
+splitBezierN c [] = [c]
+splitBezierN c [t] = [a, b] where
+  (a, b) = splitBezier c t
+splitBezierN c (t:u:rest) =
+  bezierSubsegment c 0 t :
+  bezierSubsegment c t u :
+  tail (splitBezierN c $ u:rest)
+
+-- | Return True if all the control points are colinear within tolerance.
+colinear :: CubicBezier -> Double -> Bool
+colinear (CubicBezier a b c d) eps =
+  abs (ld b) < eps && abs (ld c) < eps
+  where ld = lineDistance (Line a d)
 

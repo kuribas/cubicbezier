@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 -- | Intersection routines using Bezier Clipping.  Provides also functions for finding the roots of onedimensional bezier curves.  This can be used as a general polynomial root solver by converting from the power basis to the bernstein basis.
 module Geom2D.CubicBezier.Intersection
        (bezierIntersection, bezierLineIntersections, bezierFindRoot)
@@ -5,14 +6,12 @@ module Geom2D.CubicBezier.Intersection
 import Geom2D
 import Geom2D.CubicBezier.Basic
 import Math.BernsteinPoly
-import Data.List
-import Data.Function
 import Data.Maybe
-import Control.Monad
+
 
 -- find the convex hull by comparing the angles of the vectors with
 -- the cross product and backtracking if necessary.
-findOuter' upper dir p1 l@(p2:rest)
+findOuter' upper !dir !p1 l@(p2:rest)
   -- backtrack if the direction is outward
   | if upper
     then dir `vectorCross` (p2^-^p1) > 0 -- left turn
@@ -53,7 +52,7 @@ testBelow dmin (p:q:rest) cont
 
 testBetween :: Double -> Point -> Maybe Double -> Maybe Double
 testBetween dmax (Point x y) cont
-  | (y <= dmax) = Just x
+  | y <= dmax = Just x
   | otherwise = cont
 
 -- test if the chords cross the line y=dmax somewhere
@@ -82,26 +81,26 @@ chopHull dmin dmax ds = do
              testAbove dmax (reverse lower)
   Just (left_t, right_t)
 
-bezierClip p@(CubicBezier p0 p1 p2 p3) q@(CubicBezier q0 q1 q2 q3)
+bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
   tmin tmax umin umax prevClip eps reverse
 
   -- no intersection
-  | chop_interval == Nothing = []
+  | isNothing chop_interval = []
 
   -- not enough reduction, so split the curve in case we have
   -- multiple intersections
   | prevClip > 0.8 && newClip > 0.8 =
     if new_tmax - new_tmin > umax - umin -- split the longest segment
     then let
-      (p1, p2) = splitBezier newP 0.5
+      (pl, pr) = splitBezier newP 0.5
       half_t = new_tmin + (new_tmax - new_tmin) / 2
-      in bezierClip q p1 umin umax new_tmin half_t newClip eps (not reverse) ++
-         bezierClip q p2 umin umax half_t new_tmax newClip eps (not reverse)
+      in bezierClip q pl umin umax new_tmin half_t newClip eps (not reverse) ++
+         bezierClip q pr umin umax half_t new_tmax newClip eps (not reverse)
     else let
-      (q1, q2) = splitBezier q 0.5
+      (ql, qr) = splitBezier q 0.5
       half_t = umin + (umax - umin) / 2
-      in bezierClip q1 newP umin half_t new_tmin new_tmax newClip eps (not reverse) ++
-         bezierClip q2 newP half_t umax new_tmin new_tmax newClip eps (not reverse)
+      in bezierClip ql newP umin half_t new_tmin new_tmax newClip eps (not reverse) ++
+         bezierClip qr newP half_t umax new_tmin new_tmax newClip eps (not reverse)
 
   -- within tolerance      
   | max (umax - umin) (new_tmax - new_tmin) < eps =
@@ -183,8 +182,9 @@ bezierFindRoot p tmin tmax eps
 
 -- Apply a transformation to the bezier that maps the line onto the
 -- X-axis.  Then we only need to test the Y-values for a zero.
+bezierLineIntersections :: CubicBezier -> Line -> Double -> [Double]
 bezierLineIntersections b (Line p q) eps =
   bezierFindRoot (listToBernstein $ map pointY [p0, p1, p2, p3]) 0 1 $
   bezierParamTolerance b eps
   where (CubicBezier p0 p1 p2 p3) = 
-          (fromJust $ inverse $ translate p $* rotateVec (q ^-^ p)) $* b
+          fromJust (inverse $ translate p $* rotateVec (q ^-^ p)) $* b

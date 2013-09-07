@@ -31,6 +31,10 @@ approximateCurveWithParams curve pts ts eps =
       (t, maxError) = maximumBy (compare `on` snd) (zip ts distances)
   in (c, t, maxError)
 
+add6 (a, b, c, d, e, f) (a', b', c', d', e', f') =
+  (a+a', b+b', c+c', d+d', e+e', f+f')
+
+
 -- find the least squares between the points p_i and B(t_i) for
 -- bezier curve B, where pts contains the points p_i and ts
 -- the values of t_i .
@@ -57,9 +61,7 @@ leastSquares (CubicBezier (Point p1x p1y) (Point p2x p2y) (Point p3x p3y) (Point
         bx * ax + by * ay,
         bx * bx + by * by,
         bx * cx + by * cy)
-  (a, b, c, d, e, f) = foldl1' (\(a, b, c, d, e, f) (a', b', c', d', e', f') ->
-                                 (a+a', b+b', c+c', d+d', e+e', f+f')) $
-                       zipWith calcParams ts pts
+  (a, b, c, d, e, f) = foldl1' add6 $ zipWith calcParams ts pts
   in do (alpha1, alpha2) <- solveLinear2x2 a b c d e f
         let cp1 = Point (alpha1 * (p2x - p1x) + p1x) (alpha1 * (p2y - p1y) + p1y)
             cp2 = Point (alpha2 * (p3x - p4x) + p4x) (alpha2 * (p3y - p4y) + p4y)
@@ -69,6 +71,7 @@ leastSquares (CubicBezier (Point p1x p1y) (Point p2x p2y) (Point p3x p3y) (Point
 -- of t, and iterating again with an improved estimate of t, by taking the
 -- the values of t for which the points are closest to the curve
 
+approximateCurve' :: CubicBezier -> [Point] -> [Double] -> Int -> Double -> Double -> Maybe (CubicBezier, [Double])
 approximateCurve' curve pts ts maxiter eps prevDeltaT = do
   newCurve <- leastSquares curve pts ts
   let deltaTs = zipWith (calcDeltaT newCurve) pts ts

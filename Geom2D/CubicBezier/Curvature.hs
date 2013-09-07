@@ -5,17 +5,16 @@ import Geom2D
 import Geom2D.CubicBezier.Basic
 import Geom2D.CubicBezier.Intersection
 import Math.BernsteinPoly
-import Data.Maybe
-import Data.List
 
 -- | Curvature of the Bezier curve.
+curvature :: CubicBezier -> Double -> Double
 curvature b t
   | t == 0 = curvature' b
-  | t == 1 = curvature' $ reorient b
+  | t == 1 = negate $ curvature' $ reorient b
   | t < 0.5 = curvature' $ snd $ splitBezier b t
-  | otherwise = curvature' $ reorient $ fst $ splitBezier b t
+  | otherwise = negate $ curvature' $ reorient $ fst $ splitBezier b t
 
-curvature' b@(CubicBezier c0 c1 c2 c3) = 2/3 * b/a^3
+curvature' (CubicBezier c0 c1 c2 c3) = 2/3 * b/a^3
   where 
     a = vectorDistance c1 c0
     b = (c1^-^c0) `vectorCross` (c2^-^c1)
@@ -25,6 +24,7 @@ curvature' b@(CubicBezier c0 c1 c2 c3) = 2/3 * b/a^3
 radiusOfCurvature :: CubicBezier -> Double -> Double
 radiusOfCurvature b t = 1 / curvature b t
 
+extrema :: CubicBezier -> BernsteinPoly
 extrema (CubicBezier p0 p1 p2 p3) =
   let bez = [p0, p1, p2, p3]
       x' = bernsteinDeriv $ listToBernstein $ map pointX bez
@@ -43,6 +43,7 @@ curvatureExtrema :: CubicBezier -> Double -> [Double]
 curvatureExtrema b eps = bezierFindRoot (extrema b) 0 1 $
                          bezierParamTolerance b eps
 
+radiusSquareEq :: CubicBezier -> Double -> BernsteinPoly
 radiusSquareEq (CubicBezier p0 p1 p2 p3) d =
   let bez = [p0, p1, p2, p3]
       x' = bernsteinDeriv $ listToBernstein $ map pointX bez

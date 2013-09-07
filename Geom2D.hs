@@ -42,6 +42,7 @@ instance AffineTransform Polygon where
   transform t (Polygon p) = Polygon $ map (transform t) p
 
 -- | Operator for applying a transformation.
+($*) :: AffineTransform a => Transform -> a -> a
 t $* p = transform t p
 
 -- | Calculate the inverse of a transformation.
@@ -53,15 +54,17 @@ inverse (Transform a b c d e f) = case a*e - b*d of
 
 -- | Return the parameters (a, b, c) for the normalised equation
 -- of the line: @a*x + b*y + c = 0@.
+lineEquation :: Line -> (Double, Double, Double)
 lineEquation (Line (Point x1 y1) (Point x2 y2)) = (a, b, c)
   where a = a' / d
         b = b' / d
         c = -(y1*b' + x1*a') / d
         a' = y1 - y2
         b' = x2 - x1
-        d = sqrt(a'^2 + b'^2)
+        d = sqrt(a'*a' + b'*b')
 
 -- | Return the the distance from a point to the line.
+lineDistance :: Line -> Point -> Double
 lineDistance l = \(Point x y) -> a*x + b*y + c
   where (a, b, c) = lineEquation l
 
@@ -70,10 +73,12 @@ vectorMag :: Point -> Double
 vectorMag (Point x y) = sqrt(x*x + y*y)
 
 -- | The angle of the vector, in the range @(-'pi', 'pi']@.
+vectorAngle :: Point -> Double
 vectorAngle (Point 0.0 0.0) = 0.0
 vectorAngle (Point x y) = atan2 y x
 
 -- | The unitvector with the given angle.
+dirVector :: Double -> Point
 dirVector angle = Point (cos angle) (sin angle)
 
 -- | The unit vector with the same direction.
