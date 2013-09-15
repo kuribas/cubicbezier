@@ -11,6 +11,8 @@ import Geom2D
 import Geom2D.CubicBezier.Numeric
 import Math.BernsteinPoly
 import Numeric.Integration.TanhSinh
+import Control.Parallel.Strategies
+import Debug.Trace
 
 data CubicBezier = CubicBezier {
   bezierC0 :: Point,
@@ -39,11 +41,11 @@ bezierParam t = t >= 0 && t <= 1
 -- can use the maximum of the convex hull of the derivative, and double it to
 -- have some margin for larger values.
 bezierParamTolerance :: CubicBezier -> Double -> Double
-bezierParamTolerance (CubicBezier p1 p2 p3 p4) eps = eps / maxDist
+bezierParamTolerance (CubicBezier !p1 !p2 !p3 !p4) eps = eps / maxDist
   where 
-    maxDist = 6 * maximum [vectorDistance p1 p2,
-                           vectorDistance p2 p3,
-                           vectorDistance p3 p4]
+    maxDist = 6 * (max (vectorDistance p1 p2) $
+                   max (vectorDistance p2 p3)
+                   (vectorDistance p3 p4))
 
 -- | Reorient to the curve B(1-t).
 reorient :: CubicBezier -> CubicBezier
@@ -57,23 +59,28 @@ bezierToBernstein (CubicBezier a b c d) = (listToBernstein $ map pointX coeffs,
 
 -- | Calculate a value on the curve.
 evalBezier :: CubicBezier -> Double -> Point
-evalBezier b t = Point (bernsteinEval x t) (bernsteinEval y t)
-  where (x, y) = bezierToBernstein b
+evalBezier b = fst . evalBezierDeriv b 
 
 -- | Calculate a value and the first derivative on the curve.
 evalBezierDeriv :: CubicBezier -> Double -> (Point, Point)
-evalBezierDeriv b =
-  let (px, py) = bezierToBernstein b
-      px' = bernsteinDeriv px
-      py' = bernsteinDeriv py
-  in \t -> (Point (bernsteinEval px t) (bernsteinEval py t),
-            Point (bernsteinEval px' t) (bernsteinEval py' t))
-
+evalBezierDeriv (CubicBezier !p0 !p1 !p2 !p3) t = (bt, bt')
+  where
+    b0' = 3*^(p1^-^p0)
+    b0'' = 2*^(3*^(p2^-^p1) ^-^ b0')
+    b0''' = 6*^(p3^-^ 2*^p2 ^+^ p1) ^-^ b0''
+    bt' = b0'^+^(b0''^+^ t*^b0'''^/2)^*t
+    bt = p0 ^+^ t*^(b0' ^+^ t*^(b0''^/2 ^+^ t*^(b0'''^/6)))
+    
 -- | Calculate a value and all derivatives on the curve.
 evalBezierDerivs :: CubicBezier -> Double -> [Point]
-evalBezierDerivs b t = zipWith Point (bernsteinEvalDerivs px t)
-                       (bernsteinEvalDerivs py t)
-  where (px, py) = bezierToBernstein b
+evalBezierDerivs (CubicBezier !p0 !p1 !p2 !p3) t = [bt, bt', bt'', b0''']
+  where
+    b0' = 3*^(p1^-^p0)
+    b0'' = 2*^(3*^(p2^-^p1) ^-^ b0')
+    b0''' = 6*^(p3^-^ 2*^p2 ^+^ p1) ^-^ b0''
+    bt'' = b0''^+^ b0'''^*t
+    bt' = b0'^+^(b0''^+^ t*^b0'''^/2)^*t
+    bt = p0 ^+^ t*^(b0' ^+^ t*^(b0''^/2 ^+^ t*^(b0'''^/6)))
 
 -- | @findBezierTangent p b@ finds the parameters where
 -- the tangent of the bezier curve @b@ has the same direction as vector p.
@@ -140,10 +147,11 @@ arcLengthQuad b t eps = result $ absolute eps $
   where distDeriv t' = vectorMag $ snd $ evalD t'
         evalD = evalBezierDeriv b 
 
+outline :: CubicBezier -> Double
 outline (CubicBezier c0 c1 c2 c3) =
-  sum [vectorDistance c0 c1,
-       vectorDistance c1 c2,
-       vectorDistance c2 c3]
+  vectorDistance c0 c1 +
+  vectorDistance c1 c2 +
+  vectorDistance c2 c3
 
 arcLengthEstimate :: CubicBezier -> Double -> (Double, (Double, Double))
 arcLengthEstimate b eps = (arclen, (estimate, ol))
@@ -153,17 +161,20 @@ arcLengthEstimate b eps = (arclen, (estimate, ol))
     ol = outline b
     (arcL, (estL, olL)) = arcLengthEstimate bl eps
     (arcR, (estR, olR)) = arcLengthEstimate br eps
-    arclen | (abs(estL + estR - estimate) < eps) = estL + estR
+    arclen | abs(estL + estR - estimate) < eps = estL + estR
            | otherwise = arcL + arcR
 
 -- | arcLengthParam c len tol finds the parameter where the curve c has the arclength len,
 -- within tolerance tol.
+arcLengthParam :: CubicBezier -> Double -> Double -> Double
 arcLengthParam b len eps =
   arcLengthP b len ol (len/ol) 1 eps
   where ol = outline b
 
 -- Use the Newton rootfinding method.  Start with large tolerance
 -- values, and decrease tolerance as we go closer to the root.
+arcLengthP :: CubicBezier -> Double -> Double ->
+              Double -> Double -> Double -> Double
 arcLengthP !b !len !tot !t !dt !eps
   | abs diff < eps = t - newDt
   | otherwise = arcLengthP b len tot (t - newDt) newDt eps
@@ -202,7 +213,7 @@ splitBezierN c (t:u:rest) =
 
 -- | Return True if all the control points are colinear within tolerance.
 colinear :: CubicBezier -> Double -> Bool
-colinear (CubicBezier a b c d) eps =
+colinear (CubicBezier !a !b !c !d) eps =
   abs (ld b) < eps && abs (ld c) < eps
   where ld = lineDistance (Line a d)
 
