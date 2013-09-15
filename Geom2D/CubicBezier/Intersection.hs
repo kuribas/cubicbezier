@@ -11,7 +11,8 @@ import Data.Maybe
 
 -- find the convex hull by comparing the angles of the vectors with
 -- the cross product and backtracking if necessary.
-findOuter' upper !dir !p1 l@(p2:rest)
+findOuter' :: Bool -> Point -> Point -> [Point] -> Either [Point] [Point]
+findOuter' !upper !dir !p1 l@(p2:rest)
   -- backtrack if the direction is outward
   | if upper
     then dir `vectorCross` (p2^-^p1) > 0 -- left turn
@@ -24,6 +25,7 @@ findOuter' upper !dir !p1 l@(p2:rest)
 findOuter' _ _ p1 p = Right (p1:p)
 
 -- find the outermost point.  It doesn't look at the x values.
+findOuter :: Bool -> [Point] -> [Point]
 findOuter upper (p1:p2:rest) =
   case findOuter' upper (p2^-^p1) p2 rest of
     Right l -> p1:l
@@ -40,25 +42,25 @@ makeHull ds =
       findOuter False points)
 
 -- test if the chords cross the fat line
--- use continuation passing style
+-- return the continuation if above the line
 testBelow :: Double -> [Point] -> Maybe Double -> Maybe Double
-testBelow dmin [] _ = Nothing
-testBelow dmin [_] _ = Nothing
-testBelow dmin (p:q:rest) cont
+testBelow _    [] _ = Nothing
+testBelow _    [_] _ = Nothing
+testBelow !dmin (p:q:rest) cont
   | pointY p >= dmin = cont
   | pointY p > pointY q = Nothing
   | pointY q < dmin = testBelow dmin (q:rest) cont
   | otherwise = Just $ intersectPt dmin p q
 
 testBetween :: Double -> Point -> Maybe Double -> Maybe Double
-testBetween dmax (Point x y) cont
+testBetween !dmax (Point !x !y) cont
   | y <= dmax = Just x
   | otherwise = cont
 
 -- test if the chords cross the line y=dmax somewhere
 testAbove :: Double -> [Point] -> Maybe Double
-testAbove dmax [] = Nothing
-testAbove dmax [_] = Nothing
+testAbove _    [] = Nothing
+testAbove _    [_] = Nothing
 testAbove dmax (p:q:rest)
   | pointY p < pointY q = Nothing
   | pointY q > dmax = testAbove dmax (q:rest)
@@ -66,12 +68,14 @@ testAbove dmax (p:q:rest)
 
 -- find the x value where the line through the two points
 -- intersect the line y=d
+intersectPt :: Double -> Point -> Point -> Double
 intersectPt d (Point x1 y1) (Point x2 y2) =
   x1 + (d  - y1) * (x2 - x1) / (y2 - y1)
 
 -- make a hull and test over which interval the
 -- curve is garuanteed to lie inside the fat line
-chopHull dmin dmax ds = do
+chopHull :: Double -> Double -> [Double] -> Maybe (Double, Double)
+chopHull !dmin !dmax ds = do
   let (upper, lower) = makeHull ds
   left_t <- testBelow dmin upper $
             testBetween dmax (head upper) $
@@ -81,8 +85,11 @@ chopHull dmin dmax ds = do
              testAbove dmax (reverse lower)
   Just (left_t, right_t)
 
+bezierClip :: CubicBezier -> CubicBezier -> Double -> Double
+           -> Double -> Double -> Double -> Double -> Bool
+           -> [(Double, Double)]
 bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
-  tmin tmax umin umax prevClip eps reverse
+  tmin tmax umin umax prevClip eps revCurves
 
   -- no intersection
   | isNothing chop_interval = []
@@ -94,17 +101,17 @@ bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
     then let
       (pl, pr) = splitBezier newP 0.5
       half_t = new_tmin + (new_tmax - new_tmin) / 2
-      in bezierClip q pl umin umax new_tmin half_t newClip eps (not reverse) ++
-         bezierClip q pr umin umax half_t new_tmax newClip eps (not reverse)
+      in bezierClip q pl umin umax new_tmin half_t newClip eps (not revCurves) ++
+         bezierClip q pr umin umax half_t new_tmax newClip eps (not revCurves)
     else let
       (ql, qr) = splitBezier q 0.5
       half_t = umin + (umax - umin) / 2
-      in bezierClip ql newP umin half_t new_tmin new_tmax newClip eps (not reverse) ++
-         bezierClip qr newP half_t umax new_tmin new_tmax newClip eps (not reverse)
+      in bezierClip ql newP umin half_t new_tmin new_tmax newClip eps (not revCurves) ++
+         bezierClip qr newP half_t umax new_tmin new_tmax newClip eps (not revCurves)
 
   -- within tolerance      
   | max (umax - umin) (new_tmax - new_tmin) < eps =
-    if reverse
+    if revCurves
     then [ (umin + (umax-umin)/2,
             new_tmin + (new_tmax-new_tmin)/2) ]
     else [ (new_tmin + (new_tmax-new_tmin)/2,
@@ -112,7 +119,7 @@ bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
 
   -- iterate with the curves reversed.
   | otherwise =
-      bezierClip q newP umin umax new_tmin new_tmax newClip eps (not reverse)
+      bezierClip q newP umin umax new_tmin new_tmax newClip eps (not revCurves)
 
   where
     d = lineDistance (Line q0 q3)
