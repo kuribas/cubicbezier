@@ -11,8 +11,6 @@ import Geom2D
 import Geom2D.CubicBezier.Numeric
 import Math.BernsteinPoly
 import Numeric.Integration.TanhSinh
-import Control.Parallel.Strategies
-import Debug.Trace
 
 data CubicBezier = CubicBezier {
   bezierC0 :: Point,
