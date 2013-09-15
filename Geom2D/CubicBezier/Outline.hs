@@ -7,79 +7,24 @@ import Geom2D
 import Geom2D.CubicBezier.Basic
 import Geom2D.CubicBezier.Approximate
 import Geom2D.CubicBezier.Curvature
-import qualified Data.Map as M
-import Data.Function
-import Data.List
 
 offsetPoint :: Double -> Point -> Point -> Point
 offsetPoint dist start tangent =
   start ^+^ (rotate90L $* dist *^ normVector tangent)
 
-bezierOffsetPoint :: CubicBezier -> Double -> Double -> Point
-bezierOffsetPoint cb dist t =
-  uncurry (offsetPoint dist) $
-  evalBezierDeriv cb t
+bezierOffsetPoint :: CubicBezier -> Double -> Double -> (Point, Point)
+bezierOffsetPoint cb dist t = (offsetPoint dist p p', p')
+  where (p, p') = evalBezierDeriv cb t
 
 -- Approximate the bezier curve offset by dist.  A positive value
 -- means to the left, a negative to the right.
-approximateOffset :: CubicBezier -> Double -> Double -> (CubicBezier, Double, Double)
-approximateOffset cb@(CubicBezier p1 p2 p3 p4) dist tol =
-  approximateCurveWithParams offsetCb points ts tol
-  where tan1     = p2 ^-^ p1
-        tan2     = p4 ^-^ p3
-        offsetCb = CubicBezier
-                   (offsetPoint dist p1 tan1)
-                   (offsetPoint dist p2 tan1)
-                   (offsetPoint dist p3 tan2)
-                   (offsetPoint dist p4 tan2)
-        points   = map (bezierOffsetPoint cb dist) ts
-        ts = [i/16 | i <- [1..15]]
-
--- subdivide the original curve and approximate the offset until
--- the maximum error is below tolerance
 offsetSegment :: Double -> Double -> CubicBezier -> [CubicBezier]
-offsetSegment dist tol cb
-  | err <= tol = [cb_out]
-  | otherwise     = offsetSegment dist tol cb_l ++
-                    offsetSegment dist tol cb_r 
-  where
-    (cb_out, t, err) = approximateOffset cb dist tol
-    (cb_l, cb_r) = splitBezier cb t
+offsetSegment dist tol cb =
+  approximatePath (bezierOffsetPoint cb dist) 15 tol 0 1
 
-data OutlineSegment = OutlineSegment {
-  os_t_min :: Double,  -- the least t param of the segment in the original curve
-  os_t_err :: Double,  -- the param where the error is maximal
-  os_curve :: CubicBezier, -- the segment on the original curve
-  os_outline :: CubicBezier } -- the outline of the segment
-
--- Keep a map from maxError to OutlineSegment for each subsegment to keep
--- track of the segment with the maximum error.  This ensures a n
--- log(n) execution time, rather than n^2 when a list is used.
-offsetMax :: Double -> Double -> Int ->
-             M.Map Double OutlineSegment ->
-             [CubicBezier]
-offsetMax dist tol n segments
-  | n <= 1 = error "minimum segments to offset is 1"
-  | (n == 1) || (err < tol) = map os_outline $
-                              sortBy (compare `on` os_t_min) $
-                              M.elems segments
-
-    -- split the maximum curve in two and add the two segments to the map
-  | otherwise = offsetMax dist tol (n-1) $
-                M.insert err_l (OutlineSegment t_min t_err_l cb_l outline_l) $
-                M.insert err_r (OutlineSegment t_err t_err_r cb_r outline_r) $
-                newSegments
-  where
-    ((err, OutlineSegment t_min t_err curve _), newSegments) = M.deleteFindMax segments
-    (cb_l, cb_r) = splitBezier curve t_err
-    (outline_l, t_err_l, err_l)  = approximateOffset cb_l dist tol
-    (outline_r, t_err_r, err_r)  = approximateOffset cb_r dist tol
-    
 offsetSegmentMax :: Int -> Double -> Double -> CubicBezier -> [CubicBezier]
-offsetSegmentMax n dist tol cb =
-  offsetMax dist tol n segments
-  where segments              = M.singleton err (OutlineSegment 0 t_err cb outline)
-        (outline, t_err, err) = approximateOffset cb dist tol
+offsetSegmentMax m dist tol cb =
+  approximatePathMax m (bezierOffsetPoint cb dist) 15 tol 0 1
 
 -- | Calculate an offset path from the bezier curve to within
 -- tolerance.  If the distance is positive offset to the left,
