@@ -4,7 +4,7 @@ Synopsis:	Efficient manipulating of 2D cubic bezier curves.
 Category: 	Graphics, Geometry, Typography
 Copyright: 	Kristof Bastiaensen (2013)
 Stability:	Unstable
-License:	GPL-2
+License:	BSD3
 License-file:	LICENSE
 Author:		Kristof Bastiaensen
 Maintainer:	Kristof Bastiaensen
@@ -26,7 +26,8 @@ source-repository head
   location:	https://github.com/kuribas/cubicbezier
 
 Library
-  Build-depends: base >= 3 && < 5, containers > 0.4, integration >= 0.1.1
+  Ghc-options: -O -Wall
+  Build-depends: base >= 3 && < 5, containers > 0.4, integration >= 0.1.1, deepseq >= 1.3.0, parallel >= 2.2.0, vector >= 0.10.0
   Exposed-Modules:
     Geom2D
     Geom2D.CubicBezier
