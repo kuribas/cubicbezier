@@ -1,3 +1,5 @@
+{-# LANGUAGE BangPatterns #-}
+
 -- | Basic 2 dimensional geometry functions.
 module Geom2D where
 
@@ -6,8 +8,8 @@ infixl 7 *^, ^*, ^/
 infixr 5 $*
 
 data Point = Point {
-  pointX :: Double,
-  pointY :: Double}
+  pointX :: !Double,
+  pointY :: !Double}
 
 instance Show Point where
   show (Point x y) =
@@ -15,12 +17,12 @@ instance Show Point where
 
 -- | A transformation (x, y) -> (ax + by + c, dx + ey + d)
 data Transform = Transform {
-  xformA :: Double,
-  xformB :: Double,
-  xformC :: Double,
-  xformD :: Double,
-  xformE :: Double,
-  xformF :: Double }
+  xformA :: !Double,
+  xformB :: !Double,
+  xformC :: !Double,
+  xformD :: !Double,
+  xformE :: !Double,
+  xformF :: !Double }
                deriving Show
 
 data Line = Line Point Point
@@ -89,38 +91,47 @@ normVector p@(Point x y) = Point (x/l) (y/l)
 -- | Scale vector by constant.
 (*^) :: Double -> Point -> Point
 s *^ (Point x y) = Point (s*x) (s*y)
+{-# INLINE (*^) #-}
 
 -- | Scale vector by reciprocal of constant.
 (^/) :: Point -> Double -> Point
 (Point x y) ^/ s = Point (x/s) (y/s)
+{-# INLINE (^/) #-}
 
 -- | Scale vector by constant, with the arguments swapped.
 (^*) :: Point -> Double -> Point
 p ^* s = s *^ p
+{-# INLINE (^*) #-}
 
 -- | Add two vectors.
 (^+^) :: Point -> Point -> Point
 (Point x1 y1) ^+^ (Point x2 y2) = Point (x1+x2) (y1+y2)
+{-# INLINE (^+^) #-}
 
 -- | Subtract two vectors.
 (^-^) :: Point -> Point -> Point
 (Point x1 y1) ^-^ (Point x2 y2) = Point (x1-x2) (y1-y2)
+{-# INLINE (^-^) #-}
 
 -- | Dot product of two vectors.
 (^.^) :: Point -> Point -> Double
 (Point x1 y1) ^.^ (Point x2 y2) = x1*x2 + y1*y2
+{-# INLINE (^.^) #-}
 
 -- | Cross product of two vectors.
 vectorCross :: Point -> Point -> Double
 vectorCross (Point x1 y1) (Point x2 y2) = x1*y2 - y1*x2
+{-# INLINE vectorCross #-}
 
 -- | Distance between two vectors.
 vectorDistance :: Point -> Point -> Double
 vectorDistance p q = vectorMag (p^-^q)
+{-# INLINE vectorDistance #-}
 
 -- | Interpolate between two vectors.
 interpolateVector :: Point -> Point -> Double -> Point
 interpolateVector a b t = t*^b ^+^ (1-t)*^a
+{-# INLINE interpolateVector #-}
 
 -- | Create a transform that rotates by the angle of the given vector
 -- with the x-axis
