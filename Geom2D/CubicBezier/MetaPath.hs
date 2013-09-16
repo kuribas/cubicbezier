@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 module Geom2D.CubicBezier.MetaPath
 where
 import Geom2D.CubicBezier
@@ -41,4 +42,19 @@ solveTriDiagonal (b0, c0, d0) rows = solutions
 
 -- solve the cyclic tridiagonal system.
 -- see metafont the program: ¶ 286
-solveCyclicTriD = 
+solveCyclicTriD :: [(Double, Double, Double, Double)] -> [Double]
+solveCyclicTriD rows = solutions
+  where
+    (!un, !vn, !wn): threevars =
+      reverse $ tail $ scanl nextrow (0, 0, 1) rows
+    nextrow (!u, !v, !w) (!ai, !bi, !ci, !di) =
+      (ci/(bi - ai*u), (di - ai*v)/(bi - ai*u), -ai*w/(bi - ai*u))
+    (totvn, totwn) = foldl (\(v', w') (u, v, w) ->
+                             (v - u*v', w - u*w'))
+                     (0, 1) threevars
+    t0 = (vn - un*totvn) / (1 - (wn - un*totwn))
+    solutions = scanl nextsol t0
+                ((un, vn, wn) : reverse (tail threevars))
+    nextsol t (!u, !v, !w) = (v + w*t0 - t)/u
+    
+    
