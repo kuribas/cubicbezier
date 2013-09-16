@@ -1,7 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 -- | Intersection routines using Bezier Clipping.  Provides also functions for finding the roots of onedimensional bezier curves.  This can be used as a general polynomial root solver by converting from the power basis to the bernstein basis.
 module Geom2D.CubicBezier.Intersection
-       (bezierIntersection, bezierLineIntersections, bezierFindRoot)
+       (bezierIntersection, bezierLineIntersections, bezierFindRoot, closest)
        where
 import Geom2D
 import Geom2D.CubicBezier.Basic
@@ -195,3 +195,14 @@ bezierLineIntersections b (Line p q) eps =
   bezierParamTolerance b eps
   where (CubicBezier p0 p1 p2 p3) = 
           fromJust (inverse $ translate p $* rotateVec (q ^-^ p)) $* b
+
+-- | Find the closest value(s) on the bezier to the given point, within tolerance.
+closest :: CubicBezier -> Point -> Double -> [Double]
+closest cb (Point px py) eps = bezierFindRoot poly 0 1 eps
+  where
+    (bx, by) = bezierToBernstein cb
+    bx' = bernsteinDeriv bx
+    by' = bernsteinDeriv by
+    poly = (bx ~- listToBernstein [px, px, px, px]) ~* bx' ~+
+           (by ~- listToBernstein [py, py, py, py]) ~* by'
+
