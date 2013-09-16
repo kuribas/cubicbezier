@@ -62,10 +62,11 @@ degreeElevate b 0 = b
 degreeElevate (BernsteinPoly lp p) times =
   degreeElevate (BernsteinPoly (lp+1) (head p:inner p 1)) (times-1)
   where
+    n = fromIntegral lp
     inner []  _ = error "empty bernstein coefficients"
     inner [a] _ = [a]
     inner (a:b:rest) i =
-      (i*a/fromIntegral lp + b*(1 - i/fromIntegral lp))
+      (i*a/(n+1) + b*(1 - i/(n+1)))
       : inner (b:rest) (i+1)
 
 
