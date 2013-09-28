@@ -8,8 +8,8 @@ infixl 7 *^, ^*, ^/
 infixr 5 $*
 
 data Point = Point {
-  pointX :: !Double,
-  pointY :: !Double}
+  pointX :: {-# UNPACK #-} !Double,
+  pointY :: {-# UNPACK #-} !Double}
 
 instance Show Point where
   show (Point x y) =
@@ -17,12 +17,12 @@ instance Show Point where
 
 -- | A transformation (x, y) -> (ax + by + c, dx + ey + d)
 data Transform = Transform {
-  xformA :: !Double,
-  xformB :: !Double,
-  xformC :: !Double,
-  xformD :: !Double,
-  xformE :: !Double,
-  xformF :: !Double }
+  xformA :: {-# UNPACK #-} !Double,
+  xformB :: {-# UNPACK #-} !Double,
+  xformC :: {-# UNPACK #-} !Double,
+  xformD :: {-# UNPACK #-} !Double,
+  xformE :: {-# UNPACK #-} !Double,
+  xformF :: {-# UNPACK #-} !Double }
                deriving Show
 
 data Line = Line Point Point
@@ -51,7 +51,7 @@ t $* p = transform t p
 inverse :: Transform -> Maybe Transform
 inverse (Transform a b c d e f) = case a*e - b*d of
   0 -> Nothing
-  det -> Just $ Transform (a/det) (d/det) (-(a*c + d*f)/det) (b/det) (e/det)
+  det -> Just $! Transform (a/det) (d/det) (-(a*c + d*f)/det) (b/det) (e/det)
          (-(b*c + e*f)/det)
 
 -- | Return the parameters (a, b, c) for the normalised equation
@@ -73,15 +73,18 @@ lineDistance l = \(Point x y) -> a*x + b*y + c
 -- | The lenght of the vector.
 vectorMag :: Point -> Double
 vectorMag (Point x y) = sqrt(x*x + y*y)
+{-# INLINE vectorMag #-}
 
 -- | The angle of the vector, in the range @(-'pi', 'pi']@.
 vectorAngle :: Point -> Double
 vectorAngle (Point 0.0 0.0) = 0.0
 vectorAngle (Point x y) = atan2 y x
+{-# INLINE vectorAngle #-}
 
 -- | The unitvector with the given angle.
 dirVector :: Double -> Point
 dirVector angle = Point (cos angle) (sin angle)
+{-# INLINE dirVector #-}
 
 -- | The unit vector with the same direction.
 normVector :: Point -> Point

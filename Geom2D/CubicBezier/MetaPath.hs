@@ -16,7 +16,7 @@ data MetaJoin = Implicit {metaType1 :: MetaNodeType,
 
 data MetaNodeType = Open {getTension :: Tension }
                   | Curl {curlgamma :: Double, getTension :: Tension}
-                  | Given {nodedir :: Double, getTension :: Tension}
+                  | Given {nodedir :: Point, getTension :: Tension}
                   deriving Show
 
 data Tension = Tension {tensionValue :: Double}
@@ -40,15 +40,14 @@ showPath = concatMap showNodes
         tensions
           | getTension m1 == getTension m2 && getTension m1 == Tension 1 = ""
           | getTension m1 == getTension m2 = printf "tension %s .." (showTension $ getTension m1)
-          | otherwise = printf "tensions %s and %s .."
+          | otherwise = printf "tensions %s and %s.."
                         (showTension $ getTension m1) (showTension $ getTension m2)
-    showTension (TensionAtLeast t) = printf "atleast %.3f " t :: String
-    showTension (Tension t) = printf "%.3f " t :: String
+    showTension (TensionAtLeast t) = printf "atleast %.3f" t :: String
+    showTension (Tension t) = printf "%.3f" t :: String
     typename (Open _) = ""
     typename (Curl g _) = printf "{Curl %.3f}" g :: String
-    typename (Given dir _) = printf "{%.3f}" dir :: String
+    typename (Given dir _) = printf "{%s}" (showPoint dir) :: String
     
-
 showPoint :: Point -> String
 showPoint (Point x y) = printf "(%.3f, %.3f)" x y
 
@@ -77,7 +76,7 @@ openSubSegments' [] _   = []
 openSubSegments' l lastPoint = case break breakPoint l of
   (m, n:o) ->
     let point = case o of
-          ([(p,_)]:_) -> p
+          (((p,_):_):_) -> p
           _ -> lastPoint
     in OpenMetaPath (map head (m ++ [n])) point :
        openSubSegments' o lastPoint
@@ -92,15 +91,20 @@ joinSegments = concatMap nodes
 -- solve a cyclic metapath where all angles depend on the each other.
 unmetaCyclic :: [(Point, MetaJoin)] -> Path
 unmetaCyclic nodes =
-  let angles = solveCyclicTriD $
-               eqsCycle (map (tensionValue . getTension . metaType1 . snd) nodes)
+  let points = map fst nodes
+      chords = zipWith (^-^) points (last points : points)
+      tensionsA = (map (getTension . metaType1 . snd) nodes)
+      tensionsB = (map (getTension . metaType2 . snd) nodes)
+      turnAngles = zipWith turnAngle chords (tail $ cycle chords)
+      thetas = solveCyclicTriD $
+               eqsCycle tensionsA
                points
-               (map (tensionValue . getTension . metaType2 . snd) nodes)
-      points = map fst nodes
+               tensionsB
+               turnAngles
+      phis = zipWith (\x y -> -(x+y)) turnAngles (tail thetas)
   in ClosedPath $ zip points $
-     zipWith3 unmetaJoin points 
-     (insertAngles (map snd nodes) angles)
-     (tail points ++ points)
+     zipWith6 unmetaJoin points (tail points)
+     thetas phis tensionsA tensionsB
 
 -- solve a cyclic metapath as an open path if possible.
 -- rotate to the defined node, and rotate back after
@@ -120,13 +124,35 @@ unmetaSubSegment (OpenMetaPath [(p, Explicit u v)] q) =
 
 -- otherwise solve the angles, and find the control points
 unmetaSubSegment mp@(OpenMetaPath nodes lastpoint) =
-  let angles = solveTriDiagonal $ eqsOpen mp
-      newnodes = insertAngles (map snd nodes) angles
-      points = map fst nodes ++ [lastpoint]
-      pathjoins = zipWith3 unmetaJoin points newnodes (tail points)
+  let points = map fst nodes ++ [lastpoint]
+      joins = map snd nodes
+      chords = zipWith (^-^) (tail points) points
+      tensionsA = map (getTension . metaType1) joins
+      tensionsB = map (getTension . metaType2) joins
+      turnAngles = zipWith turnAngle chords (tail chords) ++ [0]
+      thetas = solveTriDiagonal $
+               eqsOpen points joins chords turnAngles
+               (map tensionValue tensionsA)
+               (map tensionValue tensionsB)
+      phis = zipWith (\x y -> -x-y) turnAngles (tail thetas)
+      pathjoins = zipWith6 unmetaJoin points (tail points) thetas phis tensionsA tensionsB
   in OpenPath (zip points pathjoins) lastpoint
 
-unmetaSubSegment _ = error "cyclic subsegment not allowed"
+unmetaTest mp@(OpenMetaPath nodes' lastpoint) =
+  let nodes = sanitizeOpen nodes'
+      points = map fst nodes ++ [lastpoint]
+      joins = map snd nodes
+      chords = zipWith (^-^) (tail points) points
+      tensionsA = map (getTension . metaType1) joins
+      tensionsB = map (getTension . metaType2) joins
+      turnAngles = zipWith turnAngle chords (tail chords) ++ [0]
+      eqs = --solveTriDiagonal $
+               eqsOpen points joins chords turnAngles
+               (map tensionValue tensionsA)
+               (map tensionValue tensionsB)
+      --pathjoins = zipWith6 unmetaJoin points (tail points) thetas turnAngles tensionsA tensionsB
+  in eqs
+
 
 bothOpen :: MetaJoin -> Bool
 bothOpen (Implicit (Open _) (Open _)) = True
@@ -167,11 +193,9 @@ sanitizeRest (node1@(p, Implicit m1 m2): node2@(q, Implicit n1 n2): rest) =
 sanitizeRest ((p, m): (q, n): rest) =
   case (m, n) of
     (Explicit _u v, Implicit (Open t) mt2) ->  -- explicit, open => explicit, given
-      (p, m) : sanitizeRest ((q, Implicit (Given dir t) mt2): rest)
-      where dir = vectorAngle (q^-^v)
+      (p, m) : sanitizeRest ((q, Implicit (Given (q^-^v) t) mt2): rest)
     (Implicit mt1 (Open t), Explicit u _v) ->  -- open, explicit => given, explicit
-      (p, Implicit mt1 (Given dir t)) : sanitizeRest ((q, n): rest)
-      where dir = vectorAngle (u^-^p)
+      (p, Implicit mt1 (Given (u^-^p) t)) : sanitizeRest ((q, n): rest)
     _ -> (p, m) : sanitizeRest ((q, n) : rest)
 
 sanitizeRest (n:l) = n:sanitizeRest l
@@ -200,6 +224,12 @@ solveTriDiagonal ((_, b0, c0, d0): rows) = solutions
     solutions = reverse $ scanl nextsol vn twovars
     nextsol ti (u, v) = v - u*ti
 
+solveTriDiagonal2 ((_, b0, c0, d0): rows) = reverse $ scanl nextrow (c0/b0, d0/b0) rows
+  where
+    nextrow (u, v) (ai, bi, ci, di) =
+      (ci/(bi - u*ai), (di - v*ai)/(bi - u*ai))
+    
+
 -- test = ((80.0,58.0,51.0),[(-432.0,78.0,102.0,503.0),(71.0,-82.0,20.0,2130.0),(52.39,-10.43,4.0,56.0),(34.0,38.0,0.0,257.0)])
 
 -- solve the cyclic tridiagonal system.
@@ -220,70 +250,51 @@ solveCyclicTriD rows = solutions
     nextsol t (!u, !v, !w) = (v + w*t0 - t)/u
 
 turnAngle :: Point -> Point -> Double
-turnAngle (Point x y)  q = vectorAngle $ (rotateVec p) $* q
+turnAngle (Point x y) q = vectorAngle $ rotateVec p $* q
   where p = Point x (-y)
 
 zipPrev :: [a] -> [(a, a)]
 zipPrev [] = []
 zipPrev l = zip (last l : l) l
 
-zipNext :: [a] -> [(a, a)]
-zipNext [] = []
-zipNext l = zip l (tail l)
-
--- neighbours [] = []
--- neighbours [a] = [(a, a, a)]
--- zipNeighbours f ls@(l : ls'@(l' : ls'')) =
---   ((last ls'), l, l') : zipWith3 f ls ls' (ls''++ls)
-
 -- find the equations for a cycle containing only open points
-eqsCycle :: [Double] -> [Point] -> [Double]
-         -> [(Double, Double, Double, Double)]
-eqsCycle tensionsA points tensionsB = 
+eqsCycle tensionsA points tensionsB turnAngles = 
   zipWith4 eqTension
-  (zipPrev tensionsA)
+  (zipPrev (map tensionValue tensionsA))
   (zipPrev dists)
   (zipPrev turnAngles)
-  (zipPrev tensionsB)
-  where
-    turnAngles = zipWith turnAngle chords (tail $ cycle chords)
+  (zipPrev (map tensionValue tensionsB))
+  where 
     dists = zipWith vectorDistance points (tail $ cycle points)
-    chords = zipWith (^-^) points (last points : points)
 
 -- find the equations for an path with open points.
 -- The first and last node should be a curl or a given angle
-eqsOpen :: MetaPath -> [(Double, Double, Double, Double)]
-eqsOpen (OpenMetaPath [(p, Implicit n m)] q) =
-  case (n, m) of
-    (Curl _ _, Curl _ _) -> [(0, 1, 0, a), (0, 1, 0, a)]
-      where a = vectorAngle (q^-^p)
-    (Curl g t, Given dir t2) -> [eqCurl0 g (tensionValue t) (tensionValue t2) 0,
-                                 (0, 1, 0, dir)]
-    (Given dir t, Curl g t2) -> [(0, 1, 0, dir),
-                                 eqCurlN g (tensionValue t) (tensionValue t2)]
-    _                        -> error "illegal nodetype in subsegment"
 
-eqsOpen (OpenMetaPath nodes lastpoint) =
-  traceShow (length points, length joins, length dists, length chords, length tensionsA, length tensionsB, length turnAngles) $
+eqsOpen [p, q] [join] [delta] _ _ _ =
+  case join of
+    Implicit (Curl _ _) (Curl _ _) ->
+      [(0, 1, 0, 0), (0, 1, 0, 0)]
+    Implicit (Curl g t) (Given dir t2) ->
+      [eqCurl0 g (tensionValue t) (tensionValue t2) 0,
+       (0, 1, 0, turnAngle delta dir)]
+    Implicit (Given dir t) (Curl g t2) ->
+      [(0, 1, 0, turnAngle delta dir),
+       eqCurlN g (tensionValue t) (tensionValue t2)]
+    _ -> error "illegal nodetype in subsegment"
+
+eqsOpen points joins chords turnAngles tensionsA tensionsB =
   eq0 : restEquations joins tensionsA dists turnAngles tensionsB
   where
-    points = map fst nodes ++ [lastpoint]
-    joins = map snd nodes
-    dists = zipWith vectorDistance points (tail points)
-    chords = zipWith (^-^) (tail points) points
-    tensionsA = map (tensionValue . getTension . metaType1) joins
-    tensionsB = map (tensionValue . getTension . metaType2) joins
-    turnAngles = zipWith turnAngle chords (tail chords) ++ [0]
-
+    dists = zipWith vectorDistance points (tail points)      
     eq0 = case head joins of
       (Implicit (Curl g _) _) -> eqCurl0 g (head tensionsA) (head tensionsB) (head turnAngles)
-      (Implicit (Given angle _) _) -> (0, 1, 0, angle)
+      (Implicit (Given dir _) _) -> (0, 1, 0, turnAngle (head chords) dir)
       _ -> error "illegal subsegment first nodetype"
 
     restEquations [lastnode] (tensionA:_) _ _ (tensionB:_) =
       case lastnode of
         Implicit _ (Curl g _) -> [eqCurlN g tensionA tensionB]
-        Implicit _ (Given angle _) -> [(0, 1, 0, angle)]
+        Implicit _ (Given dir _) -> [(0, 1, 0, turnAngle (last chords) dir)]
         _  -> error "illegal subsegment last nodetype"
 
     restEquations (_:othernodes) (tensionA:restTA) (d:restD) (turn:restTurn) (tensionB:restTB) =
@@ -291,8 +302,6 @@ eqsOpen (OpenMetaPath nodes lastpoint) =
       restEquations othernodes restTA restD restTurn restTB
 
     restEquations _ _ _ _ _ = error "illegal rest equations"
-
-eqsOpen _ = error "cannot find open equations for cyclic path"
 
 -- the equation for an open node
 eqTension :: (Double, Double) -> (Double, Double)
@@ -312,8 +321,11 @@ eqCurl0 gamma tensionA tensionB psi = (0, c, d, r)
   where
     c = chi/tensionA + 3 - 1/tensionB
     d = (3 - 1/tensionA)*chi + 1/tensionB
-    chi = gamma*tensionB*tensionB / tensionA*tensionA
+    chi = gamma*tensionB*tensionB / (tensionA*tensionA)
     r = -d*psi
+
+tension t u = Implicit (Open (Tension t)) (Open (Tension u))
+open = Implicit (Open (Tension 1)) (Open (Tension 1))
 
 -- the equation for an ending curl
 eqCurlN :: Double -> Double -> Double -> (Double, Double, Double, Double)
@@ -321,29 +333,13 @@ eqCurlN gamma tensionA tensionB = (a, b, 0, 0)
   where
     a = (3 - 1/tensionB)*chi + 1/tensionA
     b = chi/tensionB + 3 - 1/tensionA
-    chi = gamma*tensionA*tensionA / tensionB*tensionB
-
--- replace the angles with the given angles
-insertAngles :: [MetaJoin] -> [Double] -> [MetaJoin]
-insertAngles [] _ = []
-insertAngles ((Implicit m n): rest) (a:b:angles) =
-  Implicit (Given a (getTension m)) (Given b (getTension n)) :
-  insertAngles rest (b:angles)
-
-insertAngles _ _ = error "insertAngles: found undefined angle"
-
--- turn a metajoin into a simple join
-unmetaJoin :: Point -> MetaJoin -> Point -> PathJoin
-unmetaJoin _ (Explicit u v) _  = JoinCurve u v
+    chi = gamma*tensionA*tensionA / (tensionB*tensionB)
 
 -- magic formula for getting the control points by John Hobby
-unmetaJoin !z0 (Implicit (Given !w0 !alpha) (Given !w1 !beta)) !z1
-  | abs theta < 1e-5 && abs phi < 1e-5 = JoinLine
+unmetaJoin !z0 !z1 !theta !phi !alpha !beta
+  --- | abs (phi - theta) < 1e-5 = JoinLine
   | otherwise = JoinCurve u v
   where chord@(Point dx dy) = z1^-^z0
-        chordAngle = vectorAngle chord
-        theta = chordAngle - w0
-        phi   = w1 - chordAngle
         bounded = (signum sf == signum st) &&
                   (signum st == signum stf)
         rr' = velocity st sf ct cf alpha
@@ -361,21 +357,18 @@ unmetaJoin !z0 (Implicit (Given !w0 !alpha) (Given !w1 !beta)) !z1
           TensionAtLeast _ | bounded ->
             min ss' (sf/stf)
           _ -> ss'
-        u = z0 ^+^ rr *^ Point (dx*ct - dy*st) (dy*ct + dx*st)  -- (rotate theta $* chord)
-        v = z1 ^-^ ss *^ Point (dx*cf + dy*sf) (dy*cf - dx*sf)  -- (rotate (-phi) $* chord)
+        u = z0 ^+^ rr *^ Point (dx*ct - dy*st) (dy*ct + dx*st)  -- z0 + rr * (rotate theta chord)
+        v = z1 ^-^ ss *^ Point (dx*cf + dy*sf) (dy*cf - dx*sf)  -- z1 - ss * (rotate (-phi) chord)
 
-unmetaJoin _ _ _ = error "Cannot convert join."
-
-constant1 :: Double
-constant1 = 3*(1 + (sqrt 5 - 1))/2
-
-constant2 :: Double
-constant2 = 3*(3 - sqrt 5)/2
+constant1, constant2, sqrt2 :: Double
+constant1 = 3/2*(sqrt 5 - 1)
+constant2 = 3/2*(3 - sqrt 5)
+sqrt2 = sqrt 2
 
 -- another magic formula by John Hobby.
 velocity :: Double -> Double -> Double
          -> Double -> Tension -> Double
 velocity st sf ct cf t =
-  (2 + sqrt 2 * (st - sf/16)*(sf - st/16)*(ct - cf)) /
-  (3 + constant1*ct + constant2*cf) * tensionValue t
+  (2 + sqrt2 * (st - sf/16)*(sf - st/16)*(ct - cf)) /
+  ((3 + constant1*ct + constant2*cf) * tensionValue t)
 
