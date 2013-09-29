@@ -1,17 +1,19 @@
 {-# LANGUAGE BangPatterns #-}
--- | This module implements metafont paths.  Metafont gives a more
--- intuitive method to specify paths than bezier curves.  I'll give a
--- brief overview of the metafont curves.  For a more in depth
--- explanation look at /The MetafontBook/.
+-- | This module implements an extension to paths as used in
+-- D.E.Knuth's /Metafont/.  Metafont gives a more intuitive method to
+-- specify paths than bezier curves.  I'll give a brief overview of
+-- the metafont curves.  For a more in depth explanation look at
+-- /The MetafontBook/.
 -- 
 -- Each spline has a tension parameter, which is a relative measure of
 -- the length of the curve.  You can specify the tension for the left
--- side and the right side of the spline separately.  The default
--- tension is 1, which gives a good looking path.  If you want to
--- avoid points of inflection on the spline, you can use
--- @TensionAtLeast@ instead of @Tension@, which will adjust the length
--- of the control points so they fall into the /bounding triangle/, if
--- such a triangle exist.
+-- side and the right side of the spline separately.  By default
+-- metafont gives a tension of 1, which gives a good looking curve.
+-- Tensions shouldn't be less than 3/4, but this implementation
+-- doesn't check for it.  If you want to avoid points of inflection on
+-- the spline, you can use @TensionAtLeast@ instead of @Tension@,
+-- which will adjust the length of the control points so they fall
+-- into the /bounding triangle/, if such a triangle exist.
 --
 -- You can either give directions for each node, or let metafont find
 -- them.  Metafont will solve a set of equations to find the
@@ -21,8 +23,7 @@
 -- given.
 --
 -- Metafont will then find the control points from the path for you.
--- You can also give explicit control points, in which case it will
--- just take the ones you gave.
+-- You can also specify the control points explicitly.
 --
 -- Here is an example path from the metafont program text:
 -- 
@@ -43,11 +44,14 @@
 -- OpenMetaPath [ (z0, MetaJoin Open (Tension 1) (Tension 1) Open)
 --              , (z1, MetaJoin Open (TensionAtLeast 1) (TensionAtLeast 1) (Curl 2))
 --              , (z2, MetaJoin Open (Tension 1) (Tension 1) Open)
---              , (z3, MetaJoin (Given (Point (-1) (-2))) (Tension 3) (Tension 4) Open)
+--              , (z3, MetaJoin (Direction (Point (-1) (-2))) (Tension 3) (Tension 4) Open)
 --              , (z4, Controls z45 z54)
 --              ] z5
 -- @
 --
+-- Cyclic paths are similar, but use the @CyclicMetaPath@ contructor.
+-- There is no ending point, since the ending point will be the same
+-- as the first point.
 
 module Geom2D.CubicBezier.MetaPath
        (unmeta, MetaPath (..), MetaJoin (..), MetaNodeType (..), Tension (..))
@@ -70,7 +74,7 @@ data MetaJoin = MetaJoin { metaTypeL :: MetaNodeType
 
 data MetaNodeType = Open
                   | Curl {curlgamma :: Double}
-                  | Given {nodedir :: Point}
+                  | Direction {nodedir :: Point}
                   deriving Show
 
 data Tension = Tension {tensionValue :: Double}
@@ -100,7 +104,7 @@ showPath = concatMap showNodes
     showTension (Tension t) = printf "%.3f" t :: String
     typename Open = ""
     typename (Curl g) = printf "{curl %.3f}" g :: String
-    typename (Given dir) = printf "{%s}" (showPoint dir) :: String
+    typename (Direction dir) = printf "{%s}" (showPoint dir) :: String
     
 showPoint :: Point -> String
 showPoint (Point x y) = printf "(%.3f, %.3f)" x y
@@ -238,18 +242,18 @@ sanitizeRest (node1@(p, MetaJoin m1 tl tr m2): node2@(q, MetaJoin n1 sl sr n2): 
       node1 : sanitizeRest ((q, MetaJoin (Curl g) sl sr n2):rest)
     (Open, Curl g) -> -- open, curl => curl, curl
       (p, MetaJoin m1 tl tr (Curl g)) : sanitizeRest (node2:rest)
-    (Given dir, Open) ->   -- given, open => given, given
-      node1 : sanitizeRest ((q, (MetaJoin (Given dir) sl sr n2)) : rest)
-    (Open, Given dir) ->   -- open, given => given, given
-      (p, MetaJoin m1 tl tr (Given dir)) : sanitizeRest (node2:rest)
+    (Direction dir, Open) ->   -- given, open => given, given
+      node1 : sanitizeRest ((q, (MetaJoin (Direction dir) sl sr n2)) : rest)
+    (Open, Direction dir) ->   -- open, given => given, given
+      (p, MetaJoin m1 tl tr (Direction dir)) : sanitizeRest (node2:rest)
     _ -> node1 : sanitizeRest (node2:rest)
 
 sanitizeRest ((p, m): (q, n): rest) =
   case (m, n) of
     (Controls _u v, MetaJoin Open t1 t2 mt2) ->  -- explicit, open => explicit, given
-      (p, m) : sanitizeRest ((q, MetaJoin (Given (q^-^v)) t1 t2 mt2): rest)
+      (p, m) : sanitizeRest ((q, MetaJoin (Direction (q^-^v)) t1 t2 mt2): rest)
     (MetaJoin mt1 tl tr Open, Controls u _v) ->  -- open, explicit => given, explicit
-      (p, MetaJoin mt1 tl tr (Given (u^-^p))) : sanitizeRest ((q, n): rest)
+      (p, MetaJoin mt1 tl tr (Direction (u^-^p))) : sanitizeRest ((q, n): rest)
     _ -> (p, m) : sanitizeRest ((q, n) : rest)
 
 sanitizeRest (n:l) = n:sanitizeRest l
@@ -326,13 +330,13 @@ eqsOpen _ [join] [delta] _ _ _ =
   case join of
     MetaJoin (Curl _) _ _ (Curl _) ->
       [(0, 1, 0, 0), (0, 1, 0, 0)]
-    MetaJoin (Curl g) t1 t2 (Given dir) ->
+    MetaJoin (Curl g) t1 t2 (Direction dir) ->
       [eqCurl0 g (tensionValue t1) (tensionValue t2) 0,
        (0, 1, 0, turnAngle delta dir)]
-    MetaJoin (Given dir) t1 t2 (Curl g) ->
+    MetaJoin (Direction dir) t1 t2 (Curl g) ->
       [(0, 1, 0, turnAngle delta dir),
        eqCurlN g (tensionValue t1) (tensionValue t2)]
-    MetaJoin (Given dir) _ _ (Given dir2) ->
+    MetaJoin (Direction dir) _ _ (Direction dir2) ->
       [(0, 1, 0, turnAngle delta dir),
        (0, 1, 0, turnAngle delta dir2)]
     _ -> error "eqsOpen: illegal nodetype in subsegment"
@@ -343,13 +347,13 @@ eqsOpen points joins chords turnAngles tensionsA tensionsB =
     dists = zipWith vectorDistance points (tail points)      
     eq0 = case head joins of
       (MetaJoin (Curl g) _ _ _) -> eqCurl0 g (head tensionsA) (head tensionsB) (head turnAngles)
-      (MetaJoin (Given dir) _ _ _) -> (0, 1, 0, turnAngle (head chords) dir)
+      (MetaJoin (Direction dir) _ _ _) -> (0, 1, 0, turnAngle (head chords) dir)
       _ -> error "eqsOpen: illegal subsegment first nodetype"
 
     restEquations [lastnode] (tensionA:_) _ _ (tensionB:_) =
       case lastnode of
         MetaJoin _ _ _ (Curl g) -> [eqCurlN g tensionA tensionB]
-        MetaJoin _ _ _ (Given dir) -> [(0, 1, 0, turnAngle (last chords) dir)]
+        MetaJoin _ _ _ (Direction dir) -> [(0, 1, 0, turnAngle (last chords) dir)]
         _  -> error "eqsOpen: illegal subsegment last nodetype"
 
     restEquations (_:othernodes) (tensionA:restTA) (d:restD) (turn:restTurn) (tensionB:restTB) =
