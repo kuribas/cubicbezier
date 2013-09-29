@@ -9,8 +9,6 @@ import Data.Function
 import Data.List
 import Data.Maybe
 import qualified Data.Map as M
-import Control.DeepSeq
-import Debug.Trace
 
 interpolate :: Double -> Double -> Double -> Double
 interpolate a b x = (1-x)*a + x*b
@@ -127,6 +125,7 @@ data LSParams = LSParams {-# UNPACK #-} !Double
                 {-# UNPACK #-} !Double
                 {-# UNPACK #-} !Double
 
+addParams :: LSParams -> LSParams -> LSParams
 addParams (LSParams a b c d e f) (LSParams a' b' c' d' e' f') =
   LSParams (a+a') (b+b') (c+c') (d+d') (e+e') (f+f')
 
