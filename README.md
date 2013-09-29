@@ -14,12 +14,12 @@ Features implemented:
  * intersections between a curve and a line
  * finding inflection points and cusps
  * affine transformations on bezier curves
+ * creating paths from meta paths (as in D.E.Knuth's _metafont_)
  
 Features todo:
 
  * self intersections
  * creating an approximate outline for a curve
- * creating paths from meta paths (as in D.E.Knuth's _metafont_)
  * adding and subtracting closed paths
  * removing overlap from paths
 
