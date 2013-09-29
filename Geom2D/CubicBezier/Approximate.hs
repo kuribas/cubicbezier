@@ -76,8 +76,7 @@ approxMax f tol n ts segments
   | n < 1 = error "Minimum number of segments is one."
   | (n == 1) || (err < tol) =
     map fs_curve $ sortBy (compare `on` fs_t_min) $ map snd $ M.toList segments
-  | otherwise = trace ("inserting " ++ show (t_min, t_err, t_max)) $
-                approxMax f tol (n-1) ts $
+  | otherwise = approxMax f tol (n-1) ts $
                 M.insert err_l (FunctionSegment t_min t_err t_err_l curve_l) $
                 M.insert err_r (FunctionSegment t_err t_max t_err_r curve_r)
                 newSegments
