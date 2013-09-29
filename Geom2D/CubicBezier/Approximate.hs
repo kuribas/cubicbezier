@@ -9,8 +9,6 @@ import Data.Function
 import Data.List
 import Data.Maybe
 import qualified Data.Map as M
-import Control.DeepSeq
-import Debug.Trace
 
 interpolate :: Double -> Double -> Double -> Double
 interpolate a b x = (1-x)*a + x*b
@@ -63,9 +61,9 @@ approximatePathMax m f n tol tmin tmax =
         t_err = interpolate tmin tmax t_err'
 
 data FunctionSegment = FunctionSegment {
-  fs_t_min :: Double,  -- the least t param of the segment in the original curve
-  _fs_t_max :: Double,  -- the max t param of the segment in the original curve
-  _fs_t_err :: Double,  -- the param where the error is maximal
+  fs_t_min :: {-# UNPACK #-} !Double,  -- the least t param of the segment in the original curve
+  _fs_t_max :: {-# UNPACK #-} !Double,  -- the max t param of the segment in the original curve
+  _fs_t_err :: {-# UNPACK #-} !Double,  -- the param where the error is maximal
   fs_curve :: CubicBezier -- the curve segment
   }
 
@@ -78,8 +76,7 @@ approxMax f tol n ts segments
   | n < 1 = error "Minimum number of segments is one."
   | (n == 1) || (err < tol) =
     map fs_curve $ sortBy (compare `on` fs_t_min) $ map snd $ M.toList segments
-  | otherwise = trace ("inserting " ++ show (t_min, t_err, t_max)) $
-                approxMax f tol (n-1) ts $
+  | otherwise = approxMax f tol (n-1) ts $
                 M.insert err_l (FunctionSegment t_min t_err t_err_l curve_l) $
                 M.insert err_r (FunctionSegment t_err t_max t_err_r curve_r)
                 newSegments
@@ -120,12 +117,16 @@ approximateCurveWithParams curve pts ts eps =
       (t, maxError) = maximumBy (compare `on` snd) (zip ts distances)
   in (c, t, maxError)
 
-add6 :: (Double, Double, Double, Double, Double, Double)
-     -> (Double, Double, Double, Double, Double, Double)
-     -> (Double, Double, Double, Double, Double, Double)
-add6 (a, b, c, d, e, f) (a', b', c', d', e', f') =
-  (a+a', b+b', c+c', d+d', e+e', f+f')
+data LSParams = LSParams {-# UNPACK #-} !Double
+                {-# UNPACK #-} !Double
+                {-# UNPACK #-} !Double
+                {-# UNPACK #-} !Double
+                {-# UNPACK #-} !Double
+                {-# UNPACK #-} !Double
 
+addParams :: LSParams -> LSParams -> LSParams
+addParams (LSParams a b c d e f) (LSParams a' b' c' d' e' f') =
+  LSParams (a+a') (b+b') (c+c') (d+d') (e+e') (f+f')
 
 -- find the least squares between the points p_i and B(t_i) for
 -- bezier curve B, where pts contains the points p_i and ts
@@ -147,13 +148,14 @@ leastSquares (CubicBezier (Point !p1x !p1y) (Point !p2x !p2y) (Point !p3x !p3y) 
     by = 3 * (p3y - p4y) * (t2 - t3)
     cx = (p4x - p1x) * (3 * t2 - 2 * t3) + p1x - px
     cy = (p4y - p1y) * (3 * t2 - 2 * t3) + p1y - py
-    in force (ax * ax + ay * ay,
-              ax * bx + ay * by,
-              ax * cx + ay * cy,
-              bx * ax + by * ay,
-              bx * bx + by * by,
-              bx * cx + by * cy)
-  (!a, !b, !c, !d, !e, !f) = foldl1' add6 (zipWith calcParams ts pts)
+    in LSParams
+       (ax * ax + ay * ay)
+       (ax * bx + ay * by)
+       (ax * cx + ay * cy)
+       (bx * ax + by * ay)
+       (bx * bx + by * by)
+       (bx * cx + by * cy)
+  LSParams !a !b !c !d !e !f = foldl1' addParams (zipWith calcParams ts pts)
   in do (alpha1, alpha2) <- solveLinear2x2 a b c d e f
         let cp1 = Point (alpha1 * (p2x - p1x) + p1x) (alpha1 * (p2y - p1y) + p1y)
             cp2 = Point (alpha2 * (p3x - p4x) + p4x) (alpha2 * (p3y - p4y) + p4y)
@@ -215,7 +217,7 @@ approximateParams cb start end pts = let
 -- using more iterations doesn't appear to give an improvement
 -- See Curve Fitting with Piecewise Parametric Cubics by Stone & Plass
 calcDeltaT :: CubicBezier -> Point -> Double -> Double
-calcDeltaT curve (Point ptx pty) t = let
+calcDeltaT curve (Point !ptx !pty) t = let
   [Point bezx bezy, Point dbezx dbezy, Point ddbezx ddbezy, _] = evalBezierDerivs curve t
   in ((bezx - ptx) * dbezx + (bezy - pty) * dbezy) /
      (dbezx * dbezx + dbezy * dbezy + (bezx - ptx) * ddbezx + (bezy - pty) * ddbezy)

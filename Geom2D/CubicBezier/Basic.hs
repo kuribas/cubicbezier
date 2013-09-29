@@ -19,7 +19,10 @@ data CubicBezier = CubicBezier {
   bezierC3 :: Point} deriving Show
 
 data PathJoin = JoinLine | JoinCurve Point Point
-data Path = Path Point [(PathJoin, Point)]
+              deriving Show
+data Path = OpenPath [(Point, PathJoin)] Point
+          | ClosedPath [(Point, PathJoin)]
+          deriving Show
 
 instance AffineTransform CubicBezier where
   transform t (CubicBezier c0 c1 c2 c3) =

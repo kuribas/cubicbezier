@@ -36,6 +36,7 @@ Library
     Geom2D.CubicBezier.Outline
     Geom2D.CubicBezier.Curvature
     Geom2D.CubicBezier.Intersection
+    Geom2D.CubicBezier.MetaPath
     Math.BernsteinPoly
   Other-Modules:
     Geom2D.CubicBezier.Numeric

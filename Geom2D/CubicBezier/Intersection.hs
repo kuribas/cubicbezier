@@ -16,13 +16,13 @@ findOuter' !upper !dir !p1 l@(p2:rest)
   -- backtrack if the direction is outward
   | if upper
     then dir `vectorCross` (p2^-^p1) > 0 -- left turn
-    else dir `vectorCross` (p2^-^p1) < 0 = Left l
+    else dir `vectorCross` (p2^-^p1) < 0 = Left $! l
   -- succeed
   | otherwise = case findOuter' upper (p2^-^p1) p2 rest of
     Left m -> findOuter' upper dir p1 m
     Right m -> Right (p1:m)
 
-findOuter' _ _ p1 p = Right (p1:p)
+findOuter' _ _ p1 p = Right $! (p1:p)
 
 -- find the outermost point.  It doesn't look at the x values.
 findOuter :: Bool -> [Point] -> [Point]
@@ -50,7 +50,7 @@ testBelow !dmin (p:q:rest) cont
   | pointY p >= dmin = cont
   | pointY p > pointY q = Nothing
   | pointY q < dmin = testBelow dmin (q:rest) cont
-  | otherwise = Just $ intersectPt dmin p q
+  | otherwise = Just $! intersectPt dmin p q
 
 testBetween :: Double -> Point -> Maybe Double -> Maybe Double
 testBetween !dmax (Point !x !y) cont
@@ -64,7 +64,7 @@ testAbove _    [_] = Nothing
 testAbove dmax (p:q:rest)
   | pointY p < pointY q = Nothing
   | pointY q > dmax = testAbove dmax (q:rest)
-  | otherwise = Just $ intersectPt dmax p q
+  | otherwise = Just $! intersectPt dmax p q
 
 -- find the x value where the line through the two points
 -- intersect the line y=d
