@@ -26,7 +26,7 @@ source-repository head
   location:	https://github.com/kuribas/cubicbezier
 
 Library
-  Ghc-options: -O -Wall
+  Ghc-options: -Wall
   Build-depends: base >= 3 && < 5, containers > 0.4, integration >= 0.1.1, deepseq >= 1.3.0
   Exposed-Modules:
     Geom2D

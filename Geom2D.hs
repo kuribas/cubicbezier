@@ -10,6 +10,7 @@ infixr 5 $*
 data Point = Point {
   pointX :: {-# UNPACK #-} !Double,
   pointY :: {-# UNPACK #-} !Double}
+           deriving Eq
 
 instance Show Point where
   show (Point x y) =

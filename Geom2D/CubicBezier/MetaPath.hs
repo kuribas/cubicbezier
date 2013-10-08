@@ -87,7 +87,7 @@ instance Show MetaPath where
   show (OpenMetaPath nodes lastpoint) =
     showPath nodes ++ showPoint lastpoint
 
-showPath :: [(Point, MetaJoin)] -> [Char]
+showPath :: [(Point, MetaJoin)] -> String
 showPath = concatMap showNodes
   where
     showNodes (p, Controls u v) =
@@ -112,15 +112,27 @@ showPoint (Point x y) = printf "(%.3f, %.3f)" x y
 -- | Create a normal path from a metapath.
 unmeta :: MetaPath -> Path
 unmeta (OpenMetaPath nodes endpoint) =
-  unmetaOpen (sanitizeOpen nodes) endpoint
+  unmetaOpen (flip sanitizeOpen endpoint $ removeEmptyDirs nodes) endpoint
 
 unmeta (CyclicMetaPath nodes) =
-  case span (bothOpen . snd) nodes of
-    (l, []) -> unmetaCyclic l
-    (l, (m:n)) ->
-      if leftOpen $ snd m
+  case spanList (not . bothOpen) (removeEmptyDirs nodes) of
+    ([], []) -> error "empty metapath"
+    (l, []) -> if fst (last l) == fst (head l)
+               then unmetaAsOpen l []
+               else unmetaCyclic l
+    (l, m:n) ->
+      if leftOpen (m:n)
       then unmetaAsOpen (l++[m]) n
       else unmetaAsOpen l (m:n)
+
+-- solve a cyclic metapath as an open path if possible.
+-- rotate to the defined node, and rotate back after
+-- solving the path.
+unmetaAsOpen :: [(Point, MetaJoin)] -> [(Point, MetaJoin)] -> Path
+unmetaAsOpen l m = ClosedPath (l'++m') 
+  where n = length m
+        OpenPath o _ = unmetaOpen (sanitizeCycle (m++l)) (fst $ head m)
+        (m',l') = splitAt n o
 
 unmetaOpen :: [(Point, MetaJoin)] -> Point -> Path
 unmetaOpen nodes endpoint =
@@ -129,20 +141,16 @@ unmetaOpen nodes endpoint =
   in OpenPath path endpoint
 
 -- decompose into a list of subsegments that need to be solved.
-openSubSegments :: [(Point, MetaJoin)] -> Point -> [MetaPath]
-openSubSegments l p = openSubSegments' (tails l) p
-
-openSubSegments' :: [[(Point, MetaJoin)]] -> Point -> [MetaPath]
-openSubSegments' [[]] _ = []
-openSubSegments' [] _   = []
-openSubSegments' l lastPoint = case break breakPoint l of
-  (m, n:o) ->
-    let point = case o of
-          (((p,_):_):_) -> p
-          _ -> lastPoint
-    in OpenMetaPath (map head (m ++ [n])) point :
-       openSubSegments' o lastPoint
-  _ -> error "openSubSegments': unexpected end of segments"
+openSubSegments [] _   = []
+openSubSegments l lastPoint =
+  case spanList (not . breakPoint) l of
+    (m, n:o) ->
+      let point = case o of
+            ((p,_):_) -> p
+            _ -> lastPoint
+      in OpenMetaPath (m ++ [n]) point :
+         openSubSegments o lastPoint
+    _ -> error "openSubSegments': unexpected end of segments"
 
 -- join subsegments into one segment
 joinSegments :: [Path] -> [(Point, PathJoin)]
@@ -167,15 +175,6 @@ unmetaCyclic nodes =
   in ClosedPath $ zip points $
      zipWith6 unmetaJoin points (tail points ++ [head points])
      thetas phis tensionsA tensionsB
-
--- solve a cyclic metapath as an open path if possible.
--- rotate to the defined node, and rotate back after
--- solving the path.
-unmetaAsOpen :: [(Point, MetaJoin)] -> [(Point, MetaJoin)] -> Path
-unmetaAsOpen l m = ClosedPath (l'++m') 
-  where n = length m
-        OpenPath o _ = unmetaOpen (sanitizeCycle (m++l)) (fst $ head m)
-        (m',l') = splitAt n o
 
 -- solve a subsegment
 unmetaSubSegment :: MetaPath -> Path
@@ -202,61 +201,82 @@ unmetaSubSegment (OpenMetaPath nodes lastpoint) =
 
 unmetaSubSegment _ = error "unmetaSubSegment: subsegment should not be cyclic"
 
-bothOpen :: MetaJoin -> Bool
-bothOpen (MetaJoin Open _ _ Open) = True
+removeEmptyDirs :: [(Point, MetaJoin)] -> [(Point, MetaJoin)]
+removeEmptyDirs = map remove
+  where remove (p, MetaJoin (Direction (Point 0 0)) tl tr jr) = remove (p, MetaJoin Open tl tr jr)
+        remove (p, MetaJoin jl tl tr (Direction (Point 0 0))) = (p, MetaJoin jl tl tr Open)
+        remove j = j
+
+-- if p == q, it will become a control point
+bothOpen ((p, MetaJoin Open _ _ Open):(q, _):_) = p /= q  
+bothOpen [(_, MetaJoin Open _ _ Open)] = True
 bothOpen _ = False
 
-leftOpen :: MetaJoin -> Bool
-leftOpen (MetaJoin Open _ _ _) = True
+leftOpen ((p, MetaJoin Open _ _ _):(q, _):_) = p /= q  
+leftOpen [(_, MetaJoin Open _ _ _)] = True
 leftOpen _ = False
 
-replaceLast :: [a] -> a -> [a]
-replaceLast [] _ = []
-replaceLast [_] n = [n]
-replaceLast (l:ls) n = l:replaceLast ls n
-
 sanitizeCycle :: [(Point, MetaJoin)] -> [(Point, MetaJoin)]
-sanitizeCycle l = replaceLast ls l'
-  where
-    (l':ls) = sanitizeRest (last l: l)
+sanitizeCycle [] = []
+sanitizeCycle l = take n $ tail $
+                  sanitizeRest (drop (n-1) $ cycle l) (fst $ head l)
+  where n = length l
 
 -- replace open nodetypes with more defined nodetypes if possible
-sanitizeOpen :: [(Point, MetaJoin)] -> [(Point, MetaJoin)]
-sanitizeOpen [] = []
+sanitizeOpen [] _ = []
 
 -- starting open => curl
-sanitizeOpen ((p, MetaJoin Open t1 t2 m):rest) =
-  sanitizeRest ((p, MetaJoin (Curl 1) t1 t2 m):rest)
-sanitizeOpen l = sanitizeRest l
+sanitizeOpen ((p, MetaJoin Open t1 t2 m):rest) r =
+  sanitizeRest ((p, MetaJoin (Curl 1) t1 t2 m):rest) r
+sanitizeOpen l r = sanitizeRest l r
    
-sanitizeRest :: [(Point, MetaJoin)] -> [(Point, MetaJoin)]
-sanitizeRest [] = []
+sanitizeRest [] _ = []
 
 -- ending open => curl
-sanitizeRest [(p, MetaJoin m t1 t2 Open)] =
-  [(p, MetaJoin m t1 t2 (Curl 1))]
+sanitizeRest [(p, MetaJoin m t1 t2 Open)] r =
+  if p == r
+  then [(p, Controls p p)]
+  else [(p, MetaJoin m t1 t2 (Curl 1))]
 
-sanitizeRest (node1@(p, MetaJoin m1 tl tr m2): node2@(q, MetaJoin n1 sl sr n2): rest) =
-  case (m2, n1) of
-    (Curl g, Open) -> -- curl, open => curl, curl
-      node1 : sanitizeRest ((q, MetaJoin (Curl g) sl sr n2):rest)
-    (Open, Curl g) -> -- open, curl => curl, curl
-      (p, MetaJoin m1 tl tr (Curl g)) : sanitizeRest (node2:rest)
-    (Direction dir, Open) ->   -- given, open => given, given
-      node1 : sanitizeRest ((q, (MetaJoin (Direction dir) sl sr n2)) : rest)
-    (Open, Direction dir) ->   -- open, given => given, given
-      (p, MetaJoin m1 tl tr (Direction dir)) : sanitizeRest (node2:rest)
-    _ -> node1 : sanitizeRest (node2:rest)
+sanitizeRest (node1@(p, MetaJoin m1 tl tr m2): node2@(q, MetaJoin n1 sl sr n2): rest) r
+  | p == q =
+    -- if two consecutive points are the same, just make a curve with all control points the same
+    -- we still have to propagate a curl or given direction.
+    let newnode = (p, Controls p p)
+    in case (m2, n1) of
+      (Curl g, Open) -> -- curl, open => curl, curl
+        newnode : sanitizeRest ((q, MetaJoin (Curl g) sl sr n2):rest) r
+      (Direction dir, Open) ->   -- given, open => given, given
+        newnode : sanitizeRest ((q, MetaJoin (Direction dir) sl sr n2) : rest) r
+      _ -> newnode : sanitizeRest (node2:rest) r
+  | otherwise =
+    case (m2, n1) of
+      (Curl g, Open) -> -- curl, open => curl, curl
+        node1 : sanitizeRest ((q, MetaJoin (Curl g) sl sr n2):rest) r
+      (Open, Curl g) -> -- open, curl => curl, curl
+        (p, MetaJoin m1 tl tr (Curl g)) : sanitizeRest (node2:rest) r
+      (Direction dir, Open) ->   -- given, open => given, given
+        node1 : sanitizeRest ((q, MetaJoin (Direction dir) sl sr n2) : rest) r
+      (Open, Direction dir) ->   -- open, given => given, given
+        (p, MetaJoin m1 tl tr (Direction dir)) : sanitizeRest (node2:rest) r
+      _ -> node1 : sanitizeRest (node2:rest) r
 
-sanitizeRest ((p, m): (q, n): rest) =
+sanitizeRest ((p, m): (q, n): rest) r =
   case (m, n) of
-    (Controls _u v, MetaJoin Open t1 t2 mt2) ->  -- explicit, open => explicit, given
-      (p, m) : sanitizeRest ((q, MetaJoin (Direction (q^-^v)) t1 t2 mt2): rest)
-    (MetaJoin mt1 tl tr Open, Controls u _v) ->  -- open, explicit => given, explicit
-      (p, MetaJoin mt1 tl tr (Direction (u^-^p))) : sanitizeRest ((q, n): rest)
-    _ -> (p, m) : sanitizeRest ((q, n) : rest)
+    (Controls _u v, MetaJoin Open t1 t2 mt2) -- explicit, open => explicit, given
+      | q == v    -> (p, m) : sanitizeRest ((q, MetaJoin (Curl 1) t1 t2 mt2): rest) r
+      | otherwise -> (p, m) : sanitizeRest ((q, MetaJoin (Direction (q^-^v)) t1 t2 mt2): rest) r
+    (MetaJoin mt1 tl tr Open, Controls u _v) -- open, explicit => given, explicit
+      | u == p    -> (p, MetaJoin mt1 tl tr (Curl 1)) : sanitizeRest ((q, n): rest) r 
+      | otherwise -> (p, MetaJoin mt1 tl tr (Direction (u^-^p))) : sanitizeRest ((q, n): rest) r
+    _ -> (p, m) : sanitizeRest ((q, n) : rest) r
 
-sanitizeRest (n:l) = n:sanitizeRest l
+sanitizeRest (n:l) r = n:sanitizeRest l r
+
+spanList _ xs@[] =  (xs, xs)
+spanList p xs@(x:xs')
+  | p xs =  let (ys,zs) = spanList p xs' in (x:ys,zs)
+  | otherwise    =  ([],xs)
 
 -- break the subsegment if the angle to the left or the right is defined or a curl.
 breakPoint :: [(Point, MetaJoin)] -> Bool
@@ -302,6 +322,7 @@ solveCyclicTriD rows = solutions
     nextsol t (!u, !v, !w) = (v + w*t0 - t)/u
 
 turnAngle :: Point -> Point -> Double
+turnAngle (Point 0 0) _ = 0
 turnAngle (Point x y) q = vectorAngle $ rotateVec p $* q
   where p = Point x (-y)
 
@@ -369,7 +390,7 @@ eqTension :: (Double, Double) -> (Double, Double)
 eqTension (tensionA', tensionA) (dist', dist) (psi', psi) (tensionB', tensionB) =
   (a, b+c, d, -b*psi' - d*psi)
   where
-    a = (tensionB' * tensionB' / (tensionA' * dist'))
+    a = tensionB' * tensionB' / (tensionA' * dist')
     b = (3 - 1/tensionA') * tensionB' * tensionB' / dist'
     c = (3 - 1/tensionB) * tensionA * tensionA / dist
     d = tensionA * tensionA / (tensionB * dist)
