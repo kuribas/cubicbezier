@@ -72,7 +72,8 @@ degreeElevate (BernsteinPoly lp p) times =
 
 -- | Evaluate the bernstein polynomial.
 bernsteinEval :: BernsteinPoly -> Double -> Double
-bernsteinEval (BernsteinPoly lp [b]) _ = b
+bernsteinEval (BernsteinPoly _ []) _ = error "illegal bernstein polynomial"
+bernsteinEval (BernsteinPoly _ [b]) _ = b
 bernsteinEval (BernsteinPoly lp (b':bs)) t = go t n (b'*u) 2 bs
   where u = 1-t
         n = fromIntegral lp
@@ -83,6 +84,8 @@ bernsteinEval (BernsteinPoly lp (b':bs)) t = go t n (b'*u) 2 bs
           ((tmp + tn*bc*b)*u) -- tmp
           (i+1)             -- i
           rest
+        go _ _ _ _ [] = error "impossible"
+        
 
 -- | Evaluate the bernstein polynomial and its derivatives.
 bernsteinEvalDerivs :: BernsteinPoly -> Double -> [Double]
