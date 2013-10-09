@@ -60,7 +60,6 @@ import Geom2D
 import Geom2D.CubicBezier.Basic
 import Data.List
 import Text.Printf
-import Debug.Trace
 
 data MetaPath = OpenMetaPath [(Point, MetaJoin)] Point
               | CyclicMetaPath [(Point, MetaJoin)]
@@ -133,7 +132,6 @@ unmetaAsOpen :: [(Point, MetaJoin)] -> [(Point, MetaJoin)] -> Path
 unmetaAsOpen l m = ClosedPath (l'++m') 
   where n = length m
         OpenPath o _ =
-          traceShow (l, m) $
           unmetaOpen (sanitizeCycle (m++l)) (fst $ head (m ++l))
         (m',l') = splitAt n o
 
