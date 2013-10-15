@@ -54,7 +54,7 @@
 -- as the first point.
 
 module Geom2D.CubicBezier.MetaPath
-       --(unmeta, MetaPath (..), MetaJoin (..), MetaNodeType (..), Tension (..))
+       (unmeta, MetaPath (..), MetaJoin (..), MetaNodeType (..), Tension (..))
 where
 import Geom2D
 import Geom2D.CubicBezier.Basic
