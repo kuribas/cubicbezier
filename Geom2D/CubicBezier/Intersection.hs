@@ -198,11 +198,15 @@ bezierLineIntersections b (Line p q) eps =
 
 -- | Find the closest value(s) on the bezier to the given point, within tolerance.
 closest :: CubicBezier -> Point -> Double -> [Double]
-closest cb (Point px py) eps = bezierFindRoot poly 0 1 eps
+closest cb p@(Point px py) eps =
+  map fst $ filter (\(_, d) -> abs (d - closestDist) < eps/2) $
+  zip tVals dists
   where
+    closestDist = minimum dists
+    dists = map (vectorDistance p . evalBezier cb) tVals
+    tVals = 0:1:bezierFindRoot poly 0 1 eps
     (bx, by) = bezierToBernstein cb
     bx' = bernsteinDeriv bx
     by' = bernsteinDeriv by
     poly = (bx ~- listToBernstein [px, px, px, px]) ~* bx' ~+
            (by ~- listToBernstein [py, py, py, py]) ~* by'
-
