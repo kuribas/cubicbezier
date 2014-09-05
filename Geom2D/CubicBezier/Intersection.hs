@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns, MultiWayIf #-}
 -- | Intersection routines using Bezier Clipping.  Provides also functions for finding the roots of onedimensional bezier curves.  This can be used as a general polynomial root solver by converting from the power basis to the bernstein basis.
 module Geom2D.CubicBezier.Intersection
        (bezierIntersection, bezierLineIntersections, bezierFindRoot, closest)
@@ -94,6 +94,14 @@ bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
   -- no intersection
   | isNothing chop_interval = []
 
+  -- within tolerance      
+  | max (umax - umin) (new_tmax - new_tmin) < eps =
+    if revCurves
+    then [ (umin + (umax-umin)/2,
+            new_tmin + (new_tmax-new_tmin)/2) ]
+    else [ (new_tmin + (new_tmax-new_tmin)/2,
+            umin + (umax-umin)/2) ]
+
   -- not enough reduction, so split the curve in case we have
   -- multiple intersections
   | prevClip > 0.8 && newClip > 0.8 =
@@ -109,17 +117,8 @@ bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
       in bezierClip ql newP umin half_t new_tmin new_tmax newClip eps (not revCurves) ++
          bezierClip qr newP half_t umax new_tmin new_tmax newClip eps (not revCurves)
 
-  -- within tolerance      
-  | max (umax - umin) (new_tmax - new_tmin) < eps =
-    if revCurves
-    then [ (umin + (umax-umin)/2,
-            new_tmin + (new_tmax-new_tmin)/2) ]
-    else [ (new_tmin + (new_tmax-new_tmin)/2,
-            umin + (umax-umin)/2) ]
-
   -- iterate with the curves reversed.
-  | otherwise =
-      bezierClip q newP umin umax new_tmin new_tmax newClip eps (not revCurves)
+  | otherwise = bezierClip q newP umin umax new_tmin new_tmax newClip eps (not revCurves)
 
   where
     d = lineDistance (Line q0 q3)
@@ -137,13 +136,10 @@ bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
     new_tmin = tmax * chop_tmin + tmin * (1 - chop_tmin)
     new_tmax = tmax * chop_tmax + tmin * (1 - chop_tmax)
 
--- | Find the intersections between two Bezier curves within given
--- tolerance, using the Bezier Clip algorithm. Returns the parameters
--- for both curves.
+-- | Find the intersections between two Bezier curves, using the
+-- Bezier Clip algorithm. Returns the parameters for both curves.
 bezierIntersection :: CubicBezier -> CubicBezier -> Double -> [(Double, Double)]
-bezierIntersection p q eps = bezierClip p q 0 1 0 1 0 eps' False
-  where
-    eps' = min (bezierParamTolerance p eps) (bezierParamTolerance q eps)
+bezierIntersection p q eps = bezierClip p q 0 1 0 1 0 eps False
 
 ------------------------ Line intersection -------------------------------------
 -- Clipping a line uses a simplified version of the Bezier Clip algorithm,
@@ -210,3 +206,6 @@ closest cb p@(Point px py) eps =
     by' = bernsteinDeriv by
     poly = (bx ~- listToBernstein [px, px, px, px]) ~* bx' ~+
            (by ~- listToBernstein [py, py, py, py]) ~* by'
+
+-- let cb = (CubicBezier (Point 0 0) (Point 3 4) (Point 10 4) (Point 31 2)); cb1 = fst (splitBezier cb 0.83242); cb2 = CubicBezier {bezierC0 = Point 4.542593123258268 2.7028033902052537, bezierC1 = Point 9.036628467934 3.788306467438, bezierC2 = Point 16.832161 3.4493180000000002, bezierC3 = Point 31.0 2.0}
+-- bezierIntersection (CubicBezier (Point 0 0) (Point 3 4) (Point 10 4) (Point 31 2)) (CubicBezier (Point 0 0) (Point 6 8) (Point 2 42) (Point 4 15)) 1e-10

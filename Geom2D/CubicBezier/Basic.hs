@@ -212,9 +212,17 @@ splitBezierN c (t:u:rest) =
   bezierSubsegment c t u :
   tail (splitBezierN c $ u:rest)
 
--- | Return True if all the control points are colinear within tolerance.
+-- | Return False if some points fall outside a line with a thickness of the given tolerance.
+
+-- fat line calculation taken from the bezier-clipping algorithm (Sederberg)
 colinear :: CubicBezier -> Double -> Bool
-colinear (CubicBezier !a !b !c !d) eps =
-  abs (ld b) < eps && abs (ld c) < eps
+colinear (CubicBezier !a !b !c !d) eps = dmax - dmin < eps
   where ld = lineDistance (Line a d)
+        d1 = ld b
+        d2 = ld c
+        (dmin, dmax) | d1*d2 > 0 = (3/4 * minimum [0, d1, d2],
+                                    3/4 * maximum [0, d1, d2])
+                     | otherwise = (4/9 * minimum [0, d1, d2],
+                                    4/9 * maximum [0, d1, d2])
+
 

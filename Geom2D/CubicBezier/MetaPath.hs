@@ -1,8 +1,8 @@
 {-# LANGUAGE BangPatterns #-}
 -- | This module implements an extension to paths as used in
--- D.E.Knuth's /Metafont/.  Metafont gives a more intuitive method to
--- specify paths than bezier curves.  I'll give a brief overview of
--- the metafont curves.  For a more in depth explanation look at
+-- D.E.Knuth's /Metafont/.  Metafont gives an alternate way
+-- to specify paths using bezier curves.  I'll give a brief overview of
+-- the metafont curves.  A more in depth explanation can be found in 
 -- /The MetafontBook/.
 -- 
 -- Each spline has a tension parameter, which is a relative measure of

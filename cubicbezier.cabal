@@ -2,7 +2,7 @@ Name:		cubicbezier
 Version: 	0.2.0
 Synopsis:	Efficient manipulating of 2D cubic bezier curves.
 Category: 	Graphics, Geometry, Typography
-Copyright: 	Kristof Bastiaensen (2013)
+Copyright: 	Kristof Bastiaensen (2014)
 Stability:	Unstable
 License:	BSD3
 License-file:	LICENSE
@@ -10,7 +10,7 @@ Author:		Kristof Bastiaensen
 Maintainer:	Kristof Bastiaensen
 Bug-Reports: 	https://github.com/kuribas/cubicbezier/issues
 Build-type:	Simple
-Cabal-version:	>=1.6
+Cabal-version:	>=1.8
 Description:	This library supports efficient manipulating of 2D cubic bezier curves.  The original goal
   is to support typography, but it is useful for general graphics.  Supported features are:
   .
@@ -27,7 +27,7 @@ source-repository head
 
 Library
   Ghc-options: -Wall
-  Build-depends: base >= 3 && < 5, containers > 0.4, integration >= 0.1.1, deepseq >= 1.3.0
+  Build-depends: base >= 3, containers > 0.4, integration >= 0.1.1, deepseq >= 1.3.0
   Exposed-Modules:
     Geom2D
     Geom2D.CubicBezier

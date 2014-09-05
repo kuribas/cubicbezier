@@ -66,7 +66,9 @@ lineEquation (Line (Point x1 y1) (Point x2 y2)) = (a, b, c)
         b' = x2 - x1
         d = sqrt(a'*a' + b'*b')
 
--- | Return the the distance from a point to the line.
+-- | Return the signed distance from a point to the line.  If the
+-- distance is negative, the point lies to the right of the line
+        
 lineDistance :: Line -> Point -> Double
 lineDistance l = \(Point x y) -> a*x + b*y + c
   where (a, b, c) = lineEquation l
