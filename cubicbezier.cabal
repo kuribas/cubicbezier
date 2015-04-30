@@ -1,5 +1,5 @@
 Name:		cubicbezier
-Version: 	0.2.0
+Version: 	0.3.0
 Synopsis:	Efficient manipulating of 2D cubic bezier curves.
 Category: 	Graphics, Geometry, Typography
 Copyright: 	Kristof Bastiaensen (2014)
