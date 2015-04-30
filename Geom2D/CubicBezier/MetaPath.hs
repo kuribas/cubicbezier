@@ -164,18 +164,18 @@ joinSegments = concatMap nodes
 unmetaCyclic :: [(Point, MetaJoin)] -> Path
 unmetaCyclic nodes =
   let points = map fst nodes
-      chords = zipWith (^-^) points (last points : points)
-      tensionsA = (map (tensionL . snd) nodes)
-      tensionsB = (map (tensionR . snd) nodes)
+      chords = zipWith (^-^) (tail $ cycle points) points
+      tensionsA = map (tensionL . snd) nodes
+      tensionsB = map (tensionR . snd) nodes
       turnAngles = zipWith turnAngle chords (tail $ cycle chords)
       thetas = solveCyclicTriD $
                eqsCycle tensionsA
                points
                tensionsB
                turnAngles
-      phis = zipWith (\x y -> -(x+y)) turnAngles (tail thetas ++ [head thetas])
+      phis = zipWith (\x y -> -(x+y)) turnAngles (tail $ cycle thetas)
   in ClosedPath $ zip points $
-     zipWith6 unmetaJoin points (tail points ++ [head points])
+     zipWith6 unmetaJoin points (tail $ cycle points)
      thetas phis tensionsA tensionsB
 
 -- solve a subsegment
@@ -190,15 +190,16 @@ unmetaSubSegment (OpenMetaPath nodes lastpoint) =
   let points = map fst nodes ++ [lastpoint]
       joins = map snd nodes
       chords = zipWith (^-^) (tail points) points
-      tensionsA = map tensionL  joins
+      tensionsA = map tensionL joins
       tensionsB = map tensionR joins
       turnAngles = zipWith turnAngle chords (tail chords) ++ [0]
       thetas = solveTriDiagonal $
                eqsOpen points joins chords turnAngles
                (map tensionValue tensionsA)
                (map tensionValue tensionsB)
-      phis = zipWith (\x y -> -x-y) turnAngles (tail thetas)
-      pathjoins = zipWith6 unmetaJoin points (tail points) thetas phis tensionsA tensionsB
+      phis = zipWith (\x y -> -(x+y)) turnAngles (tail thetas)
+      pathjoins =
+        zipWith6 unmetaJoin points (tail points) thetas phis tensionsA tensionsB
   in OpenPath (zip points pathjoins) lastpoint
 
 unmetaSubSegment _ = error "unmetaSubSegment: subsegment should not be cyclic"
@@ -288,7 +289,7 @@ breakPoint ((_,  MetaJoin _ _ _ Open):(_, MetaJoin Open _ _ _):_) = False
 breakPoint _ = True
 
 -- solve the tridiagonal system for t[i]:
--- a[n] t[i-1] + b[i] t[i] + c[b] t[i+1] = d[i]
+-- a[n] t[i-1] + b[n] t[i] + c[n] t[i+1] = d[i]
 -- where a[0] = c[n] = 0
 -- by first rewriting it into
 -- the system t[i] + u[i] t[i+1] = v[i]
@@ -306,8 +307,19 @@ solveTriDiagonal ((_, b0, c0, d0): rows) = solutions
     solutions = reverse $ scanl nextsol vn twovars
     nextsol ti (u, v) = v - u*ti
 
--- test = ((80.0,58.0,51.0),[(-432.0,78.0,102.0,503.0),(71.0,-82.0,20.0,2130.0),(52.39,-10.43,4.0,56.0),(34.0,38.0,0.0,257.0)])
+-- solveTriDiagonal2 :: (Double, Double, Double) -> V.Vector (Double, Double, Double, Double) -> V.Vector Double
+-- solveTriDiagonal2 (!b0, !c0, !d0) rows = solutions
+--   where
+--     solutions = undefined
+--     twovars = V.scanl nextrow (c0/b0, d0/b0) rows
+--     solutions = scanr V.unsafeInit
+--     nextrow (u, v) (ai, bi, ci, di) =
+--       (ci/(bi - u*ai), (di - v*ai)/(bi - u*ai))
 
+-- test = ((80.0,58.0,51.0),[(-432.0,78.0,102.0,503.0),(71.0,-82.0,20.0,2130.0),(52.39,-10.43,4.0,56.0),(34.0,38.0,0.0,257.0)])
+-- [-15.726940528143576,22.571642107784243,-78.93751365259996,-297.27313545829384,272.74438435742667]
+      
+     
 -- solve the cyclic tridiagonal system.
 -- see metafont the program: ¶ 286
 solveCyclicTriD :: [(Double, Double, Double, Double)] -> [Double]
@@ -330,19 +342,19 @@ turnAngle (Point 0 0) _ = 0
 turnAngle (Point x y) q = vectorAngle $ rotateVec p $* q
   where p = Point x (-y)
 
-zipPrev :: [a] -> [(a, a)]
-zipPrev [] = []
-zipPrev l = zip (last l : l) l
+zipNext :: [b] -> [(b, b)]
+zipNext [] = []
+zipNext l = zip l (tail $ cycle l)
 
 -- find the equations for a cycle containing only open points
 eqsCycle :: [Tension] -> [Point] -> [Tension]
          -> [Double] -> [(Double, Double, Double, Double)]
 eqsCycle tensionsA points tensionsB turnAngles = 
   zipWith4 eqTension
-  (zipPrev (map tensionValue tensionsA))
-  (zipPrev dists)
-  (zipPrev turnAngles)
-  (zipPrev (map tensionValue tensionsB))
+  (zipNext (map tensionValue tensionsA))
+  (zipNext dists)
+  (zipNext turnAngles)
+  (zipNext (map tensionValue tensionsB))
   where 
     dists = zipWith vectorDistance points (tail $ cycle points)
 
@@ -420,7 +432,7 @@ eqCurlN gamma tensionA tensionB = (a, b, 0, 0)
     b = chi/tensionB + 3 - 1/tensionA
     chi = gamma*tensionA*tensionA / (tensionB*tensionB)
 
--- magic formula for getting the control points by John Hobby
+-- getting the control points
 unmetaJoin :: Point -> Point -> Double -> Double -> Tension -> Tension -> PathJoin
 unmetaJoin !z0 !z1 !theta !phi !alpha !beta
   | abs phi < 1e-4 && abs theta < 1e-4 = JoinLine
@@ -443,17 +455,20 @@ unmetaJoin !z0 !z1 !theta !phi !alpha !beta
           TensionAtLeast _ | bounded ->
             min ss' (st/stf)
           _ -> ss'
-        u = z0 ^+^ rr *^ Point (dx*ct - dy*st) (dy*ct + dx*st)  -- z0 + rr * (rotate theta chord)
-        v = z1 ^-^ ss *^ Point (dx*cf + dy*sf) (dy*cf - dx*sf)  -- z1 - ss * (rotate (-phi) chord)
+        -- u = z0 + rr * (rotate theta chord)
+        u = z0 ^+^ rr *^ Point (dx*ct - dy*st) (dy*ct + dx*st)
+        -- v = z1 - ss * (rotate (-phi) chord)
+        v = z1 ^-^ ss *^ Point (dx*cf + dy*sf) (dy*cf - dx*sf)
 
 constant1, constant2, sqrt2 :: Double
-constant1 = 3/2*(sqrt 5 - 1)
-constant2 = 3/2*(3 - sqrt 5)
+constant1 = 3*(sqrt 5 - 1)/2
+constant2 = 3*(3 - sqrt 5)/2
 sqrt2 = sqrt 2
 
 -- another magic formula by John Hobby.
 velocity :: Double -> Double -> Double
          -> Double -> Tension -> Double
 velocity st sf ct cf t =
+  min 4 $ 
   (2 + sqrt2 * (st - sf/16)*(sf - st/16)*(ct - cf)) /
   ((3 + constant1*ct + constant2*cf) * tensionValue t)
