@@ -27,7 +27,7 @@ source-repository head
 
 Library
   Ghc-options: -Wall
-  Build-depends: base >= 3, containers > 0.4, integration >= 0.1.1
+  Build-depends: base >= 3 && < 5, containers > 0.4, integration >= 0.1.1
   Exposed-Modules:
     Geom2D
     Geom2D.CubicBezier
