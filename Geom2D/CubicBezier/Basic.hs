@@ -44,9 +44,9 @@ bezierParam t = t >= 0 && t <= 1
 bezierParamTolerance :: CubicBezier -> Double -> Double
 bezierParamTolerance (CubicBezier !p1 !p2 !p3 !p4) eps = eps / maxDist
   where 
-    maxDist = 6 * (max (vectorDistance p1 p2) $
-                   max (vectorDistance p2 p3)
-                   (vectorDistance p3 p4))
+    maxDist = 6 * max (vectorDistance p1 p2)
+              (max (vectorDistance p2 p3)
+               (vectorDistance p3 p4))
 
 -- | Reorient to the curve B(1-t).
 reorient :: CubicBezier -> CubicBezier
@@ -64,25 +64,26 @@ evalBezier b = fst . evalBezierDeriv b
 
 -- | Calculate a value and the first derivative on the curve.
 evalBezierDeriv :: CubicBezier -> Double -> (Point, Point)
-evalBezierDeriv (CubicBezier !p0 !p1 !p2 !p3) t = (bt, bt')
+evalBezierDeriv cb t = (b,b')
   where
-    b0' = 3*^(p1^-^p0)
-    b0'' = 2*^(3*^(p2^-^p1) ^-^ b0')
-    b0''' = 6*^(p3^-^ 2*^p2 ^+^ p1) ^-^ b0''
-    bt' = b0'^+^(b0''^+^ t*^b0'''^/2)^*t
-    bt = p0 ^+^ t*^(b0' ^+^ t*^(b0''^/2 ^+^ t*^(b0'''^/6)))
+    (b,b',_,_) = evalBezierDerivs cb t
     
 -- | Calculate a value and all derivatives on the curve.
-evalBezierDerivs :: CubicBezier -> Double -> [Point]
-evalBezierDerivs (CubicBezier !p0 !p1 !p2 !p3) t = [bt, bt', bt'', b0''']
+evalBezierDerivs :: CubicBezier -> Double -> (Point, Point, Point, Point)
+evalBezierDerivs (CubicBezier !a !b !c !d) t =
+  (interp abbc bccd,
+   3*^(bccd ^-^ abbc),
+   6*^(cd ^-^ 2*^bc ^+^ ab),
+   6*^(d ^+^ 3*^(b ^-^ c) ^-^ a))
   where
-    b0' = 3*^(p1^-^p0)
-    b0'' = 2*^(3*^(p2^-^p1) ^-^ b0')
-    b0''' = 6*^(p3^-^ 2*^p2 ^+^ p1) ^-^ b0''
-    bt'' = b0''^+^ b0'''^*t
-    bt' = b0'^+^(b0''^+^ t*^b0'''^/2)^*t
-    bt = p0 ^+^ t*^(b0' ^+^ t*^(b0''^/2 ^+^ t*^(b0'''^/6)))
-
+    mt = 1-t
+    interp !v !w = mt*^v ^+^ t*^w
+    ab = interp a b
+    bc = interp b c
+    cd = interp c d
+    abbc = interp ab bc
+    bccd = interp bc cd
+           
 -- | @findBezierTangent p b@ finds the parameters where
 -- the tangent of the bezier curve @b@ has the same direction as vector p.
 
