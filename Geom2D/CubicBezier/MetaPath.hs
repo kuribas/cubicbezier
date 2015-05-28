@@ -161,14 +161,14 @@ unmeta (CyclicMetaPath nodes) =
 -- solve a cyclic metapath as an open path if possible.
 -- rotate to the defined node, and rotate back after
 -- solving the path.
-unmetaAsOpen :: [(DPoint, MetaJoin Double)] -> [(DPoint, MetaJoin Double)] -> (Path Double)
+unmetaAsOpen :: [(DPoint, MetaJoin Double)] -> [(DPoint, MetaJoin Double)] -> Path Double
 unmetaAsOpen l m = ClosedPath (l'++m') 
   where n = length m
         OpenPath o _ =
           unmetaOpen (sanitizeCycle (m++l)) (fst $ head (m ++l))
         (m',l') = splitAt n o
 
-unmetaOpen :: [(DPoint, MetaJoin Double)] -> DPoint -> (Path Double)
+unmetaOpen :: [(DPoint, MetaJoin Double)] -> DPoint -> Path Double
 unmetaOpen nodes endpoint =
   let subsegs = openSubSegments nodes endpoint
       path = joinSegments $ map unmetaSubSegment subsegs
