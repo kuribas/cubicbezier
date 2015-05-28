@@ -11,7 +11,7 @@ import Data.Maybe
 
 -- find the convex hull by comparing the angles of the vectors with
 -- the cross product and backtracking if necessary.
-findOuter' :: Bool -> Point -> Point -> [Point] -> Either [Point] [Point]
+findOuter' :: Bool -> DPoint -> DPoint -> [DPoint] -> Either [DPoint] [DPoint]
 findOuter' !upper !dir !p1 l@(p2:rest)
   -- backtrack if the direction is outward
   | if upper
@@ -25,7 +25,7 @@ findOuter' !upper !dir !p1 l@(p2:rest)
 findOuter' _ _ p1 p = Right $! (p1:p)
 
 -- find the outermost point.  It doesn't look at the x values.
-findOuter :: Bool -> [Point] -> [Point]
+findOuter :: Bool -> [DPoint] -> [DPoint]
 findOuter upper (p1:p2:rest) =
   case findOuter' upper (p2^-^p1) p2 rest of
     Right l -> p1:l
@@ -34,7 +34,7 @@ findOuter _ l = l
 
 -- take the y values and turn it in into a convex hull with upper en
 -- lower points separated.
-makeHull :: [Double] -> ([Point], [Point])
+makeHull :: [Double] -> ([DPoint], [DPoint])
 makeHull ds =
   let n      = fromIntegral $ length ds - 1
       points = zipWith Point [i/n | i <- [0..n]] ds
@@ -43,7 +43,7 @@ makeHull ds =
 
 -- test if the chords cross the fat line
 -- return the continuation if above the line
-testBelow :: Double -> [Point] -> Maybe Double -> Maybe Double
+testBelow :: Double -> [DPoint] -> Maybe Double -> Maybe Double
 testBelow _    [] _ = Nothing
 testBelow _    [_] _ = Nothing
 testBelow !dmin (p:q:rest) cont
@@ -52,13 +52,13 @@ testBelow !dmin (p:q:rest) cont
   | pointY q < dmin = testBelow dmin (q:rest) cont
   | otherwise = Just $! intersectPt dmin p q
 
-testBetween :: Double -> Point -> Maybe Double -> Maybe Double
+testBetween :: Double -> DPoint -> Maybe Double -> Maybe Double
 testBetween !dmax (Point !x !y) cont
   | y <= dmax = Just x
   | otherwise = cont
 
 -- test if the chords cross the line y=dmax somewhere
-testAbove :: Double -> [Point] -> Maybe Double
+testAbove :: Double -> [DPoint] -> Maybe Double
 testAbove _    [] = Nothing
 testAbove _    [_] = Nothing
 testAbove dmax (p:q:rest)
@@ -68,7 +68,7 @@ testAbove dmax (p:q:rest)
 
 -- find the x value where the line through the two points
 -- intersect the line y=d
-intersectPt :: Double -> Point -> Point -> Double
+intersectPt :: Double -> DPoint -> DPoint -> Double
 intersectPt d (Point x1 y1) (Point x2 y2) =
   x1 + (d  - y1) * (x2 - x1) / (y2 - y1)
 
@@ -85,7 +85,7 @@ chopHull !dmin !dmax ds = do
              testAbove dmax (reverse lower)
   Just (left_t, right_t)
 
-bezierClip :: CubicBezier -> CubicBezier -> Double -> Double
+bezierClip :: CubicBezier Double -> CubicBezier Double -> Double -> Double
            -> Double -> Double -> Double -> Double -> Bool
            -> [(Double, Double)]
 bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
@@ -138,7 +138,7 @@ bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
 
 -- | Find the intersections between two Bezier curves, using the
 -- Bezier Clip algorithm. Returns the parameters for both curves.
-bezierIntersection :: CubicBezier -> CubicBezier -> Double -> [(Double, Double)]
+bezierIntersection :: CubicBezier Double -> CubicBezier Double -> Double -> [(Double, Double)]
 bezierIntersection p q eps = bezierClip p q 0 1 0 1 0 eps False
 
 ------------------------ Line intersection -------------------------------------
@@ -185,7 +185,7 @@ bezierFindRoot p tmin tmax eps
 
 -- Apply a transformation to the bezier that maps the line onto the
 -- X-axis.  Then we only need to test the Y-values for a zero.
-bezierLineIntersections :: CubicBezier -> Line -> Double -> [Double]
+bezierLineIntersections :: CubicBezier Double -> Line Double -> Double -> [Double]
 bezierLineIntersections b (Line p q) eps =
   bezierFindRoot (listToBernstein $ map pointY [p0, p1, p2, p3]) 0 1 $
   bezierParamTolerance b eps
@@ -193,7 +193,7 @@ bezierLineIntersections b (Line p q) eps =
           fromJust (inverse $ translate p $* rotateVec (q ^-^ p)) $* b
 
 -- | Find the closest value(s) on the bezier to the given point, within tolerance.
-closest :: CubicBezier -> Point -> Double -> [Double]
+closest :: CubicBezier Double -> DPoint -> Double -> [Double]
 closest cb p@(Point px py) eps =
   map fst $ filter (\(_, d) -> abs (d - closestDist) < eps/2) $
   zip tVals dists

@@ -8,21 +8,21 @@ import Geom2D.CubicBezier.Basic
 import Geom2D.CubicBezier.Approximate
 import Geom2D.CubicBezier.Curvature
 
-offsetPoint :: Double -> Point -> Point -> Point
+offsetPoint :: Double -> DPoint -> DPoint -> DPoint
 offsetPoint dist start tangent =
   start ^+^ (rotate90L $* dist *^ normVector tangent)
 
-bezierOffsetPoint :: CubicBezier -> Double -> Double -> (Point, Point)
+bezierOffsetPoint :: CubicBezier Double -> Double -> Double -> (DPoint, DPoint)
 bezierOffsetPoint cb dist t = (offsetPoint dist p p', p')
   where (p, p') = evalBezierDeriv cb t
 
 -- Approximate the bezier curve offset by dist.  A positive value
 -- means to the left, a negative to the right.
-offsetSegment :: Double -> Double -> CubicBezier -> [CubicBezier]
+offsetSegment :: Double -> Double -> CubicBezier Double -> [CubicBezier Double]
 offsetSegment dist tol cb =
   approximatePath (bezierOffsetPoint cb dist) 15 tol 0 1
 
-offsetSegmentMax :: Int -> Double -> Double -> CubicBezier -> [CubicBezier]
+offsetSegmentMax :: Int -> Double -> Double -> CubicBezier Double-> [CubicBezier Double]
 offsetSegmentMax m dist tol cb =
   approximatePathMax m (bezierOffsetPoint cb dist) 15 tol 0 1
 
@@ -30,10 +30,10 @@ offsetSegmentMax m dist tol cb =
 -- tolerance.  If the distance is positive offset to the left,
 -- otherwise to the right. A smaller tolerance may require more bezier
 -- curves in the path to approximate the offset curve
-bezierOffset :: CubicBezier -- ^ The curve
+bezierOffset :: CubicBezier Double -- ^ The curve
              -> Double      -- ^ Offset distance.
              -> Double      -- ^ Tolerance.
-             -> [CubicBezier]        -- ^ The offset curve
+             -> [CubicBezier Double]        -- ^ The offset curve
 bezierOffset cb dist tol =
   --Path $ map BezierSegment $
   concatMap (offsetSegment dist tol) $
@@ -42,7 +42,7 @@ bezierOffset cb dist tol =
 
 -- | Like bezierOffset, but limit the number of subpaths for each
 -- smooth subsegment.  The number should not be smaller than one.
-bezierOffsetMax :: Int -> CubicBezier -> Double -> Double -> [CubicBezier]
+bezierOffsetMax :: Int -> CubicBezier Double -> Double -> Double -> [CubicBezier Double]
 bezierOffsetMax n cb dist tol =
   -- Path $ map BezierSegment $
   concatMap (offsetSegmentMax n dist tol) $

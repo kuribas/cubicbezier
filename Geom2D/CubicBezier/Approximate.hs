@@ -19,12 +19,12 @@ interpolate a b x = (1-x)*a + x*b
 -- to avoid changes in direction by subdividing the original function
 -- at points of inflection.
 
-approximatePath :: (Double -> (Point, Point)) -- ^ The function to approximate and it's derivative
+approximatePath :: (Double -> (DPoint, DPoint)) -- ^ The function to approximate and it's derivative
                 -> Double                     -- ^ The number of discrete samples taken to approximate each subcurve
                 -> Double                     -- ^ The tolerance
                 -> Double                     -- ^ The lower parameter of the function      
                 -> Double                     -- ^ The upper parameter of the function
-                -> [CubicBezier]
+                -> [CubicBezier Double]
 approximatePath f n tol tmin tmax
   | err <= tol = [cb_out]
   | otherwise = approximatePath f n tol tmin terr ++
@@ -42,12 +42,12 @@ approximatePath f n tol tmin tmax
 
 -- | Like approximatePath, but limit the number of subcurves.
 approximatePathMax :: Int                        -- ^ The maximum number of subcurves
-                   -> (Double -> (Point, Point)) -- ^ The function to approximate and it's derivative
+                   -> (Double -> (DPoint, DPoint)) -- ^ The function to approximate and it's derivative
                    -> Double                     -- ^ The number of discrete samples taken to approximate each subcurve
                    -> Double                     -- ^ The tolerance
                    -> Double                     -- ^ The lower parameter of the function      
                    -> Double                     -- ^ The upper parameter of the function
-                   -> [CubicBezier]
+                   -> [CubicBezier Double]
 approximatePathMax m f n tol tmin tmax =
   approxMax f tol m ts segments
   where segments              = M.singleton err (FunctionSegment tmin tmax t_err outline)
@@ -64,14 +64,14 @@ data FunctionSegment = FunctionSegment {
   fs_t_min :: {-# UNPACK #-} !Double,  -- the least t param of the segment in the original curve
   _fs_t_max :: {-# UNPACK #-} !Double,  -- the max t param of the segment in the original curve
   _fs_t_err :: {-# UNPACK #-} !Double,  -- the param where the error is maximal
-  fs_curve :: CubicBezier -- the curve segment
+  fs_curve :: CubicBezier Double -- the curve segment
   }
 
 -- Keep a map from maxError to FunctionSegment for each subsegment to keep
 -- track of the segment with the maximum error.  This ensures a n
 -- log(n) execution time, rather than n^2 when a list is used.
-approxMax :: (Double -> (Point, Point)) -> Double -> Int
-          -> [Double] -> M.Map Double FunctionSegment -> [CubicBezier]
+approxMax :: (Double -> (DPoint, DPoint)) -> Double -> Int
+          -> [Double] -> M.Map Double FunctionSegment -> [CubicBezier Double]
 approxMax f tol n ts segments
   | n < 1 = error "Minimum number of segments is one."
   | (n == 1) || (err < tol) =
@@ -100,7 +100,7 @@ approxMax f tol n ts segments
 -- return the curve, the parameter with maximum error, and maximum error.
 -- Calculate to withing eps tolerance.
 
-approximateCurve :: CubicBezier -> [Point] -> Double -> (CubicBezier, Double, Double)
+approximateCurve :: CubicBezier Double -> [DPoint] -> Double -> (CubicBezier Double, Double, Double)
 approximateCurve curve@(CubicBezier p1 _ _ p4) pts eps =
   approximateCurveWithParams curve pts (approximateParams curve p1 p4 pts) eps
 
@@ -108,7 +108,7 @@ approximateCurve curve@(CubicBezier p1 _ _ p4) pts eps =
 -- parameters closest to the points.  This might be faster if a good
 -- guess can be made.
 
-approximateCurveWithParams :: CubicBezier -> [Point] -> [Double] -> Double -> (CubicBezier, Double, Double)
+approximateCurveWithParams :: CubicBezier Double -> [DPoint] -> [Double] -> Double -> (CubicBezier Double, Double, Double)
 approximateCurveWithParams curve pts ts eps =
   let (c, newTs) = fromMaybe (curve, ts) $
                    approximateCurve' curve pts ts 40 (bezierParamTolerance curve eps) 1
@@ -138,7 +138,7 @@ addParams (LSParams a b c d e f) (LSParams a' b' c' d' e' f') =
 -- minimizing (sum |B(t_i) - p_i|^2) gives a linear equation
 -- with two unknown values (alpha1 and alpha2), which can be
 -- solved easily
-leastSquares :: CubicBezier -> [Point] -> [Double] -> Maybe CubicBezier
+leastSquares :: CubicBezier Double -> [DPoint] -> [Double] -> Maybe (CubicBezier Double)
 leastSquares (CubicBezier (Point !p1x !p1y) (Point !p2x !p2y) (Point !p3x !p3y) (Point !p4x !p4y)) pts ts = let
   calcParams t (Point px py) = let
     t2 = t * t; t3 = t2 * t
@@ -161,11 +161,15 @@ leastSquares (CubicBezier (Point !p1x !p1y) (Point !p2x !p2y) (Point !p3x !p3y) 
             cp2 = Point (alpha2 * (p3x - p4x) + p4x) (alpha2 * (p3y - p4y) + p4y)
         Just $ CubicBezier (Point p1x p1y) cp1 cp2 (Point p4x p4y)
 
+offBez = CubicBezier {bezierC0 = Point (-0.9984603532054123) 0.6656402354702748, bezierC1 = Point 5.001539646794588 9.665640235470274, bezierC2 = Point (-0.15147186257614287) 7.848528137423857, bezierC3 = Point 5.848528137423857 1.8485281374238571}
+offset = [(Point (-0.38561064422602453) 1.534174843357413,Point 5.459999999999999 7.23),(Point 0.20981740728624898 2.257123236825599,Point 5.040000000000001 5.520000000000001),(Point 0.8250761640484685 2.8465346207778452,Point 4.739999999999999 3.8699999999999974),(Point 1.5113436854000506 3.297312629199899,Point 4.56 2.2799999999999985),(Point 2.3027212152335723 3.5586727085985723,Point 4.499999999999999 0.7499999999999973),(Point 3.139155088167614 3.561315558394883,Point 4.560000000000001 (-0.720000000000002)),(Point 3.9078614426037217 3.327564900442083,Point 4.74 (-2.13)),(Point 4.58582886049917 2.9394762807229355,Point 5.039999999999997 (-3.4800000000000018)),(Point 5.217502221265897 2.4427069450968126,Point 5.459999999999999 (-4.770000000000001))]
+Just lq = leastSquares offBez (map fst offset) ([0.1,0.2..0.9])
+
 -- calculate the least Squares bezier curve by choosing approximate values
 -- of t, and iterating again with an improved estimate of t, by taking the
 -- the values of t for which the points are closest to the curve
 
-approximateCurve' :: CubicBezier -> [Point] -> [Double] -> Int -> Double -> Double -> Maybe (CubicBezier, [Double])
+approximateCurve' :: CubicBezier Double -> [DPoint] -> [Double] -> Int -> Double -> Double -> Maybe (CubicBezier Double, [Double])
 approximateCurve' curve pts ts maxiter eps prevDeltaT = do
   newCurve <- leastSquares curve pts ts
   let deltaTs = zipWith (calcDeltaT newCurve) pts ts
@@ -194,7 +198,7 @@ approximateCurve' curve pts ts maxiter eps prevDeltaT = do
 interpolateTs :: [Double] -> [Double] -> [Double] -> [Double] -> [Double]
 interpolateTs ts ts' deltaTs deltaTs' =
   map (max 0 . min 1) (
-    if all id $ zipWith (\dT dT' -> dT * dT' > 0 && dT' / dT < 1) deltaTs deltaTs'
+    if and $ zipWith (\dT dT' -> dT * dT' > 0 && dT' / dT < 1) deltaTs deltaTs'
     then zipWith3 (\t dT dT' -> let
                       newDt = (dT * dT / (dT - dT'))
                       in t - (if abs newDt > 0.2 then dT' else newDt)) ts deltaTs deltaTs'
@@ -202,7 +206,7 @@ interpolateTs ts ts' deltaTs deltaTs' =
 
 -- approximate t by calculating the distances between all points
 -- and dividing by the total sum
-approximateParams :: CubicBezier -> Point -> Point -> [Point] -> [Double]
+approximateParams :: CubicBezier Double -> DPoint -> DPoint -> [DPoint] -> [Double]
 approximateParams cb start end pts = let
   segments = start : (pts ++ [end])
   dists = zipWith vectorDistance segments (tail segments)
@@ -216,8 +220,8 @@ approximateParams cb start end pts = let
 -- the reduction of t is one iteration of Newton Raphson:  f'(t)/f''(t)
 -- using more iterations doesn't appear to give an improvement
 -- See Curve Fitting with Piecewise Parametric Cubics by Stone & Plass
-calcDeltaT :: CubicBezier -> Point -> Double -> Double
+calcDeltaT :: CubicBezier Double -> DPoint -> Double -> Double
 calcDeltaT curve (Point !ptx !pty) t = let
-  [Point bezx bezy, Point dbezx dbezy, Point ddbezx ddbezy, _] = evalBezierDerivs curve t
+  (Point bezx bezy, Point dbezx dbezy, Point ddbezx ddbezy, _) = evalBezierDerivs curve t
   in ((bezx - ptx) * dbezx + (bezy - pty) * dbezy) /
      (dbezx * dbezx + dbezy * dbezy + (bezx - ptx) * ddbezx + (bezy - pty) * ddbezy)

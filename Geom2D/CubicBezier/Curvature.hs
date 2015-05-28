@@ -8,14 +8,14 @@ import Math.BernsteinPoly
 
 -- | Curvature of the Bezier curve.  A negative curvature means the curve
 -- curves to the right.
-curvature :: CubicBezier -> Double -> Double
+curvature :: CubicBezier Double -> Double -> Double
 curvature b t
   | t == 0 = curvature' b
   | t == 1 = negate $ curvature' $ reorient b
   | t < 0.5 = curvature' $ snd $ splitBezier b t
   | otherwise = negate $ curvature' $ reorient $ fst $ splitBezier b t
 
-curvature' :: CubicBezier -> Double
+curvature' :: CubicBezier Double -> Double
 curvature' (CubicBezier c0 c1 c2 _c3) = 2/3 * b/a^(3::Int)
   where 
     a = vectorDistance c1 c0
@@ -23,10 +23,10 @@ curvature' (CubicBezier c0 c1 c2 _c3) = 2/3 * b/a^(3::Int)
 
 -- | Radius of curvature of the Bezier curve.  This
 -- is the reciprocal of the curvature.
-radiusOfCurvature :: CubicBezier -> Double -> Double
+radiusOfCurvature :: CubicBezier Double -> Double -> Double
 radiusOfCurvature b t = 1 / curvature b t
 
-extrema :: CubicBezier -> BernsteinPoly
+extrema :: CubicBezier Double -> BernsteinPoly
 extrema bez = 
   let (x, y) = bezierToBernstein bez
       x' = bernsteinDeriv x
@@ -39,13 +39,13 @@ extrema bez =
      3 *~ (x'~*y'' ~- y'~*x'') ~* (y'~*y'' ~+ x'~*x'')
 
 -- | Find extrema of the curvature, but not inflection points.
-curvatureExtrema :: CubicBezier -> Double -> [Double]
+curvatureExtrema :: CubicBezier Double -> Double -> [Double]
 curvatureExtrema b eps
   | colinear b eps = []
   | otherwise = bezierFindRoot (extrema b) 0 1 $
                 bezierParamTolerance b eps
 
-radiusSquareEq :: CubicBezier -> Double -> BernsteinPoly
+radiusSquareEq :: CubicBezier Double -> Double -> BernsteinPoly
 radiusSquareEq bez d =
   let (x, y) = bezierToBernstein bez
       x' = bernsteinDeriv x
@@ -58,7 +58,7 @@ radiusSquareEq bez d =
 
 -- | Find points on the curve that have a certain radius of curvature.
 -- Values to the left and to the right of the curve are returned.
-findRadius :: CubicBezier  -- ^ the curve
+findRadius :: CubicBezier Double  -- ^ the curve
            -> Double       -- ^ distance
            -> Double       -- ^ tolerance
            -> [Double]     -- ^ result

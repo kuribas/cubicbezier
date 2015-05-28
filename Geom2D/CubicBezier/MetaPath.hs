@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns, DeriveFunctor #-}
 -- | This module implements an extension to paths as used in
 -- D.E.Knuth's /Metafont/.  Metafont gives an alternate way
 -- to specify paths using bezier curves.  I'll give a brief overview of
@@ -60,34 +60,67 @@ import Geom2D
 import Geom2D.CubicBezier.Basic
 import Data.List
 import Text.Printf
+import qualified Data.Vector as V
 
-data MetaPath = OpenMetaPath [(Point, MetaJoin)] Point
-              | CyclicMetaPath [(Point, MetaJoin)]
+data MetaPath a = OpenMetaPath [(Point a, MetaJoin a)] (Point a)
+                -- ^ A metapath with endpoints
+              | CyclicMetaPath [(Point a, MetaJoin a)]
+                -- ^ A metapath with cycles.  The last join joins the
+                -- last point with the first.
+              deriving (Eq, Functor)
 
-data MetaJoin = MetaJoin { metaTypeL :: MetaNodeType
+data MetaJoin a = MetaJoin { metaTypeL :: MetaNodeType a
+                           -- ^ The nodetype going out of the
+                           -- previous point.  The metafont default is
+                           -- @Open@.
                          , tensionL :: Tension
+                           -- ^ The tension going out of the previous point.
+                           -- The metafont default is 1.
                          , tensionR :: Tension
-                         , metaTypeR :: MetaNodeType
+                           -- ^ The tension going into the next point.
+                           -- The metafont default is 1.
+                         , metaTypeR :: MetaNodeType a
+                           -- ^ The nodetype going into the next point.
+                           -- The metafont default is @Open@.
                          }
-              | Controls Point Point
-              deriving Show
+              | Controls (Point a) (Point a)
+                -- ^ Specify the control points explicitly.
+              deriving (Show, Eq, Functor)
 
-data MetaNodeType = Open
+data MetaNodeType a = Open
+                    -- ^ An open node has no direction specified.  If
+                    -- it is an internal node, the curve will keep the
+                    -- same direction going into and going out from
+                    -- the node.  If it is an endpoint or corner
+                    -- point, it will have curl of 1.
                   | Curl {curlgamma :: Double}
-                  | Direction {nodedir :: Point}
-                  deriving (Eq, Show)
+                    -- ^ The node becomes and endpoint or a corner
+                    -- point.  The curl specifies how much the segment
+                    -- `curves`.  A curl of `gamma` means that the
+                    -- curvature is `gamma` times that of the
+                    -- following node.
+                  | Direction {nodedir :: Point a}
+                    -- ^ The node has a given direction.
+                  deriving (Eq, Show, Functor)
 
 data Tension = Tension {tensionValue :: Double}
+               -- ^ The tension value specifies how /tense/ the curve is.
+               -- A higher value means the curve approaches a line
+               -- segment, while a lower value means the curve is more
+               -- round.  Metafont doesn't allow values below 3/4.
              | TensionAtLeast {tensionValue :: Double}
+               -- ^ Like @Tension@, but keep the segment inside the
+               -- bounding triangle defined by the control points, if
+               -- there is one.
              deriving (Eq, Show)
 
-instance Show MetaPath where
+instance Show a => Show (MetaPath a) where
   show (CyclicMetaPath nodes) =
     showPath nodes ++ "cycle"
   show (OpenMetaPath nodes lastpoint) =
     showPath nodes ++ showPoint lastpoint
 
-showPath :: [(Point, MetaJoin)] -> String
+showPath :: Show a => [(Point a, MetaJoin a)] -> String
 showPath = concatMap showNodes
   where
     showNodes (p, Controls u v) =
@@ -106,11 +139,11 @@ showPath = concatMap showNodes
     typename (Curl g) = printf "{curl %.3f}" g :: String
     typename (Direction dir) = printf "{%s}" (showPoint dir) :: String
     
-showPoint :: Point -> String
-showPoint (Point x y) = printf "(%.3f, %.3f)" x y
+showPoint :: Show a => Point a -> String
+showPoint (Point x y) = "(" ++ show x ++ ", " ++ show y ++ ")"
 
 -- | Create a normal path from a metapath.
-unmeta :: MetaPath -> Path
+unmeta :: MetaPath Double -> Path Double
 unmeta (OpenMetaPath nodes endpoint) =
   unmetaOpen (flip sanitize endpoint $ removeEmptyDirs nodes) endpoint
 
@@ -128,21 +161,21 @@ unmeta (CyclicMetaPath nodes) =
 -- solve a cyclic metapath as an open path if possible.
 -- rotate to the defined node, and rotate back after
 -- solving the path.
-unmetaAsOpen :: [(Point, MetaJoin)] -> [(Point, MetaJoin)] -> Path
+unmetaAsOpen :: [(DPoint, MetaJoin Double)] -> [(DPoint, MetaJoin Double)] -> (Path Double)
 unmetaAsOpen l m = ClosedPath (l'++m') 
   where n = length m
         OpenPath o _ =
           unmetaOpen (sanitizeCycle (m++l)) (fst $ head (m ++l))
         (m',l') = splitAt n o
 
-unmetaOpen :: [(Point, MetaJoin)] -> Point -> Path
+unmetaOpen :: [(DPoint, MetaJoin Double)] -> DPoint -> (Path Double)
 unmetaOpen nodes endpoint =
   let subsegs = openSubSegments nodes endpoint
       path = joinSegments $ map unmetaSubSegment subsegs
   in OpenPath path endpoint
 
 -- decompose into a list of subsegments that need to be solved.
-openSubSegments :: [(Point, MetaJoin)] -> Point -> [MetaPath]
+openSubSegments :: [(DPoint, MetaJoin Double)] -> DPoint -> [MetaPath Double]
 openSubSegments [] _   = []
 openSubSegments l lastPoint =
   case spanList (not . breakPoint) l of
@@ -155,13 +188,13 @@ openSubSegments l lastPoint =
     _ -> error "openSubSegments': unexpected end of segments"
 
 -- join subsegments into one segment
-joinSegments :: [Path] -> [(Point, PathJoin)]
+joinSegments :: [Path Double] -> [(DPoint, PathJoin Double)]
 joinSegments = concatMap nodes
   where nodes (OpenPath n _) = n
         nodes (ClosedPath n) = n
 
 -- solve a cyclic metapath where all angles depend on the each other.
-unmetaCyclic :: [(Point, MetaJoin)] -> Path
+unmetaCyclic :: [(DPoint, MetaJoin Double)] -> Path Double
 unmetaCyclic nodes =
   let points = map fst nodes
       chords = zipWith (^-^) (tail $ cycle points) points
@@ -179,7 +212,7 @@ unmetaCyclic nodes =
      thetas phis tensionsA tensionsB
 
 -- solve a subsegment
-unmetaSubSegment :: MetaPath -> Path
+unmetaSubSegment :: MetaPath Double -> Path Double
 
 -- the simple case where the control points are already given.
 unmetaSubSegment (OpenMetaPath [(p, Controls u v)] q) =
@@ -204,30 +237,30 @@ unmetaSubSegment (OpenMetaPath nodes lastpoint) =
 
 unmetaSubSegment _ = error "unmetaSubSegment: subsegment should not be cyclic"
 
-removeEmptyDirs :: [(Point, MetaJoin)] -> [(Point, MetaJoin)]
+removeEmptyDirs :: [(DPoint, MetaJoin Double)] -> [(DPoint, MetaJoin Double)]
 removeEmptyDirs = map remove
   where remove (p, MetaJoin (Direction (Point 0 0)) tl tr jr) = remove (p, MetaJoin Open tl tr jr)
         remove (p, MetaJoin jl tl tr (Direction (Point 0 0))) = (p, MetaJoin jl tl tr Open)
         remove j = j
 
 -- if p == q, it will become a control point
-bothOpen :: [(Point, MetaJoin)] -> Bool
+bothOpen :: [(DPoint, MetaJoin Double)] -> Bool
 bothOpen ((p, MetaJoin Open _ _ Open):(q, _):_) = p /= q  
 bothOpen [(_, MetaJoin Open _ _ Open)] = True
 bothOpen _ = False
 
-leftOpen :: [(Point, MetaJoin)] -> Bool
+leftOpen :: [(DPoint, MetaJoin Double)] -> Bool
 leftOpen ((p, MetaJoin Open _ _ _):(q, _):_) = p /= q  
 leftOpen [(_, MetaJoin Open _ _ _)] = True
 leftOpen _ = False
 
-sanitizeCycle :: [(Point, MetaJoin)] -> [(Point, MetaJoin)]
+sanitizeCycle :: [(DPoint, MetaJoin Double)] -> [(DPoint, MetaJoin Double)]
 sanitizeCycle [] = []
 sanitizeCycle l = take n $ tail $
                   sanitize (drop (n-1) $ cycle l) (fst $ head l)
   where n = length l
 
-sanitize :: [(Point, MetaJoin)] -> Point -> [(Point, MetaJoin)]
+sanitize :: [(DPoint, MetaJoin Double)] -> DPoint -> [(DPoint, MetaJoin Double)]
 sanitize [] _ = []
 
 -- ending open => curl
@@ -284,7 +317,7 @@ spanList p xs@(x:xs')
   | otherwise    =  ([],xs)
 
 -- break the subsegment if the angle to the left or the right is defined or a curl.
-breakPoint :: [(Point, MetaJoin)] -> Bool
+breakPoint :: [(DPoint, MetaJoin Double)] -> Bool
 breakPoint ((_,  MetaJoin _ _ _ Open):(_, MetaJoin Open _ _ _):_) = False
 breakPoint _ = True
 
@@ -298,23 +331,18 @@ breakPoint _ = True
 -- see metafont the program: ¶ 283
 solveTriDiagonal :: [(Double, Double, Double, Double)] -> [Double]
 solveTriDiagonal [] = error "solveTriDiagonal: not enough equations"
-solveTriDiagonal ((_, b0, c0, d0): rows) = solutions
+solveTriDiagonal ((_, b0, c0, d0): rows) =
+  V.toList $ solveTriDiagonal2 (b0, c0, d0) (V.fromList rows)
+
+solveTriDiagonal2 :: (Double, Double, Double) -> V.Vector (Double, Double, Double, Double) -> V.Vector Double
+solveTriDiagonal2 (!b0, !c0, !d0) rows = solutions
   where
-    ((_, vn): twovars) =
-      reverse $ scanl nextrow (c0/b0, d0/b0) rows
+    twovars = V.scanl nextrow (c0/b0, d0/b0) rows
+    solutions = V.scanr nextsol vn (V.unsafeInit twovars)
+    vn = snd $ V.unsafeLast twovars
+    nextsol (u, v) ti = v - u*ti
     nextrow (u, v) (ai, bi, ci, di) =
       (ci/(bi - u*ai), (di - v*ai)/(bi - u*ai))
-    solutions = reverse $ scanl nextsol vn twovars
-    nextsol ti (u, v) = v - u*ti
-
--- solveTriDiagonal2 :: (Double, Double, Double) -> V.Vector (Double, Double, Double, Double) -> V.Vector Double
--- solveTriDiagonal2 (!b0, !c0, !d0) rows = solutions
---   where
---     solutions = undefined
---     twovars = V.scanl nextrow (c0/b0, d0/b0) rows
---     solutions = scanr V.unsafeInit
---     nextrow (u, v) (ai, bi, ci, di) =
---       (ci/(bi - u*ai), (di - v*ai)/(bi - u*ai))
 
 -- test = ((80.0,58.0,51.0),[(-432.0,78.0,102.0,503.0),(71.0,-82.0,20.0,2130.0),(52.39,-10.43,4.0,56.0),(34.0,38.0,0.0,257.0)])
 -- [-15.726940528143576,22.571642107784243,-78.93751365259996,-297.27313545829384,272.74438435742667]
@@ -337,7 +365,7 @@ solveCyclicTriD rows = solutions
                 ((un, vn, wn) : reverse (tail threevars))
     nextsol t (!u, !v, !w) = (v + w*t0 - t)/u
 
-turnAngle :: Point -> Point -> Double
+turnAngle :: DPoint -> DPoint -> Double
 turnAngle (Point 0 0) _ = 0
 turnAngle (Point x y) q = vectorAngle $ rotateVec p $* q
   where p = Point x (-y)
@@ -347,7 +375,7 @@ zipNext [] = []
 zipNext l = zip l (tail $ cycle l)
 
 -- find the equations for a cycle containing only open points
-eqsCycle :: [Tension] -> [Point] -> [Tension]
+eqsCycle :: [Tension] -> [DPoint] -> [Tension]
          -> [Double] -> [(Double, Double, Double, Double)]
 eqsCycle tensionsA points tensionsB turnAngles = 
   zipWith4 eqTension
@@ -361,7 +389,7 @@ eqsCycle tensionsA points tensionsB turnAngles =
 -- find the equations for an path with open points.
 -- The first and last node should be a curl or a given angle
 
-eqsOpen :: [Point] -> [MetaJoin] -> [Point] -> [Double]
+eqsOpen :: [DPoint] -> [MetaJoin Double] -> [DPoint] -> [Double]
         -> [Double] -> [Double] -> [(Double, Double, Double, Double)]
 eqsOpen _ [MetaJoin mt1 t1 t2 mt2] [delta] _ _ _ =
   let replaceType Open = Curl 1
@@ -433,9 +461,9 @@ eqCurlN gamma tensionA tensionB = (a, b, 0, 0)
     chi = gamma*tensionA*tensionA / (tensionB*tensionB)
 
 -- getting the control points
-unmetaJoin :: Point -> Point -> Double -> Double -> Tension -> Tension -> PathJoin
+unmetaJoin :: DPoint -> DPoint -> Double -> Double -> Tension -> Tension -> PathJoin Double
 unmetaJoin !z0 !z1 !theta !phi !alpha !beta
-  | abs phi < 1e-4 && abs theta < 1e-4 = JoinLine
+  | abs phi < 1e-4 && abs theta < 1e-4 = JoinLine z1
   | otherwise = JoinCurve u v
   where Point dx dy = z1^-^z0
         bounded = (sf <= 0 && st <= 0 && sf <= 0) ||

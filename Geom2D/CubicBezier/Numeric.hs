@@ -24,9 +24,9 @@ quadraticRoot a b c
 -- >d x + e y + f = 0
 -- 
 -- Returns @Nothing@ if no solution is found.
-solveLinear2x2 :: Double -> Double -> Double -> Double -> Double -> Double -> Maybe (Double, Double)
+solveLinear2x2 :: (Eq a, Fractional a) => a -> a -> a -> a -> a -> a -> Maybe (a, a)
 solveLinear2x2 a b c d e f =
   case det of 0 -> Nothing
               _ -> Just ((c * e - b * f) / det, (a * f - c * d)  / det)
   where det = d * b - a * e
-
+{-# SPECIALIZE solveLinear2x2 :: Double -> Double -> Double -> Double -> Double -> Double -> Maybe (Double, Double) #-}
