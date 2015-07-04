@@ -1,8 +1,9 @@
-{-# LANGUAGE BangPatterns, FlexibleInstances, MultiParamTypeClasses, DeriveFunctor #-}
+{-# LANGUAGE BangPatterns, FlexibleInstances, MultiParamTypeClasses, DeriveFunctor, ViewPatterns #-}
 module Geom2D.CubicBezier.Basic
-       (CubicBezier (..), PathJoin (..), Path (..), AffineTransform (..), 
+       (CubicBezier (..), QuadBezier (..), AnyBezier (..), GenericBezier (..),
+        PathJoin (..), Path (..), AffineTransform (..), 
         bezierParam, bezierParamTolerance, reorient, bezierToBernstein,
-        evalBezier, evalBezierDeriv, evalBezierDerivs, findBezierTangent,
+        evalBezier, evalBezierDeriv, findBezierTangent,
         bezierHoriz, bezierVert, findBezierInflection, findBezierCusp,
         arcLength, arcLengthParam, splitBezier, bezierSubsegment, splitBezierN,
         colinear)
@@ -11,14 +12,99 @@ import Geom2D
 import Geom2D.CubicBezier.Numeric
 import Math.BernsteinPoly
 import Numeric.Integration.TanhSinh
+import qualified Data.Vector.Unboxed as V
+import qualified Data.Vector.Unboxed.Mutable as MV
 
 data CubicBezier a = CubicBezier {
-  bezierC0 :: Point a,
-  bezierC1 :: Point a,
-  bezierC2 :: Point a,
-  bezierC3 :: Point a} deriving (Show, Functor)
+  cubicC0 :: !(Point a),
+  cubicC1 :: !(Point a),
+  cubicC2 :: !(Point a),
+  cubicC3 :: !(Point a)}
+                   deriving (Show, Functor)
 
-data PathJoin a = JoinLine (Point a) | JoinCurve (Point a) (Point a)
+data QuadBezier a = QuadBezier {
+  quadC0 :: !(Point a),
+  quadC1 :: !(Point a),
+  quadC2 :: !(Point a)}
+                   deriving (Show, Functor)
+
+-- Use a tuple, because it has 0(1) unzip when using unboxed vectors.
+data AnyBezier a = AnyBezier (V.Vector (a, a))
+
+class GenericBezier b where
+  degree :: (V.Unbox a) => b a -> Int
+  toVector :: (V.Unbox a) => b a -> V.Vector (a, a)
+  unsafeFromVector :: (V.Unbox a) => V.Vector (a, a) -> b a
+  evalBezierDerivs :: (Fractional a, V.Unbox a) => b a -> a -> [Point a]
+
+instance GenericBezier CubicBezier where
+  degree _ = 3
+  toVector (CubicBezier (Point ax ay) (Point bx by)
+            (Point cx cy) (Point dx dy)) =
+    V.create $ do
+      v <- MV.new 4
+      MV.write v 0 (ax, ay)
+      MV.write v 1 (bx, by)
+      MV.write v 2 (cx, cy)
+      MV.write v 3 (dx, dy)
+      return v
+    
+  unsafeFromVector v = CubicBezier
+                       (uncurry Point $ v `V.unsafeIndex` 0)
+                       (uncurry Point $ v `V.unsafeIndex` 1)
+                       (uncurry Point $ v `V.unsafeIndex` 2)
+                       (uncurry Point $ v `V.unsafeIndex` 3)
+  evalBezierDerivs (CubicBezier a b c d) t =
+    [p, p', p'', p''', Point 0 0]
+    where
+      u = 1-t
+      t2 = t*t
+      t3 = t2*t
+      da = 3*^(b^-^a)
+      db = 3*^(c^-^b)
+      dc = 3*^(d^-^c)
+      p = u*^(u*^(u*^a ^+^ 3*t*^b) ^+^ 3*t2*^c) ^+^ t3*^d
+      p' = u*^(u*^da ^+^ 2*t*^db) ^+^ t2*^dc
+      p'' = 2*u*^(db^-^da) ^+^ 2*t*^(dc^-^db)
+      p''' = 2*^(dc^-^2*^db^+^da)
+
+instance GenericBezier QuadBezier where
+  degree _ = 2
+  toVector (QuadBezier (Point ax ay) (Point bx by)
+            (Point cx cy)) =
+    V.create $ do
+      v <- MV.new 3
+      MV.write v 0 (ax, ay)
+      MV.write v 1 (bx, by)
+      MV.write v 2 (cx, cy)
+      return v
+    
+  unsafeFromVector v = QuadBezier
+                       (uncurry Point $ v `V.unsafeIndex` 0)
+                       (uncurry Point $ v `V.unsafeIndex` 1)
+                       (uncurry Point $ v `V.unsafeIndex` 2)
+
+  evalBezierDerivs (QuadBezier a b c) t = [p, p', p'', Point 0 0]
+    where
+      u = 1-t
+      t2 = t*t
+      p = u*^(u*^a ^+^ 2*t*^b) ^+^ t2*^c
+      p' = 2*^(u*^(b^-^a) ^+^ t*^(c^-^b))
+      p'' = 2*^(c^-^ 2*^b ^+^ a)
+      
+
+instance GenericBezier AnyBezier where
+  degree (AnyBezier b) = V.length b
+  toVector (AnyBezier v) = v
+  unsafeFromVector = AnyBezier
+  evalBezierDerivs (AnyBezier b) t =
+    zipWith Point (bernsteinEvalDerivs (BernsteinPoly x) t)
+    (bernsteinEvalDerivs (BernsteinPoly y) t)
+    where (x, y) = V.unzip b
+
+
+data PathJoin a = JoinLine (Point a) |
+                  JoinCurve (Point a) (Point a)
               deriving (Show, Functor)
 data Path a = OpenPath [(Point a, PathJoin a)] (Point a)
             | ClosedPath [(Point a, PathJoin a)]
@@ -32,58 +118,43 @@ instance (Num a) => AffineTransform (CubicBezier a) a where
 -- | Return True if the param lies on the curve, iff it's in the interval @[0, 1]@.
 bezierParam :: (Ord a, Num a) => a -> Bool
 bezierParam t = t >= 0 && t <= 1
-{-# SPECIALIZE bezierParam :: Double -> Bool #-}
+{-# INLINE bezierParam #-}
 
 -- | Convert a tolerance from the codomain to the domain of the bezier
 -- curve, by dividing by the maximum velocity on the curve.  The
 -- estimate is conservative, but holds for any value on the curve.
-bezierParamTolerance :: CubicBezier Double -> Double -> Double
-bezierParamTolerance (CubicBezier !p1 !p2 !p3 !p4) eps = eps / maxVel
+bezierParamTolerance :: (GenericBezier b) => b Double -> Double -> Double
+bezierParamTolerance (toVector -> v) eps = eps / maxVel
   where 
-    maxVel = 3 * max (vectorDistance p1 p2)
-             (max (vectorDistance p2 p3)
-              (vectorDistance p3 p4))
+    maxVel = 3 * V.maximum (V.zipWith vectorDistance (V.map (uncurry Point) v)
+                            (V.map (uncurry Point) $ V.tail v))
+{-# INLINE bezierParamTolerance #-}    
 
 -- | Reorient to the curve B(1-t).
-reorient :: CubicBezier a -> CubicBezier a
-reorient (CubicBezier p0 p1 p2 p3) = CubicBezier p3 p2 p1 p0
+reorient :: (GenericBezier b, V.Unbox a) => b a -> b a
+reorient = unsafeFromVector . V.reverse . toVector
 {-# INLINE reorient #-}
 
 -- | Give the bernstein polynomial for each coordinate.
-bezierToBernstein :: CubicBezier Double -> (BernsteinPoly, BernsteinPoly)
-bezierToBernstein (CubicBezier a b c d) = (listToBernstein $ map pointX coeffs,
-                                           listToBernstein $ map pointY coeffs)
-  where coeffs = [a, b, c, d]
+bezierToBernstein :: (GenericBezier b, MV.Unbox a) =>
+                     b a -> (BernsteinPoly a, BernsteinPoly a)
+bezierToBernstein b = (BernsteinPoly x, BernsteinPoly y)
+  where (x, y) = V.unzip $ toVector b
+{-# INLINE bezierToBernstein #-}                      
 
--- | Calculate a value on the curve.
-evalBezier :: Num a => CubicBezier a -> a -> Point a
-evalBezier b = fst . evalBezierDeriv b
-{-# SPECIALIZE evalBezier :: CubicBezier Double -> Double -> DPoint #-}
+evalBezier :: (GenericBezier b, MV.Unbox a, Fractional a) =>
+              b a -> a -> Point a
+evalBezier bc t = head $ evalBezierDerivs bc t
+{-# INLINE evalBezier #-}
 
 -- | Calculate a value and the first derivative on the curve.
-evalBezierDeriv :: Num a => CubicBezier a -> a -> (Point a, Point a)
-evalBezierDeriv cb t = (b,b')
+evalBezierDeriv :: (V.Unbox a, Fractional a) =>
+                   GenericBezier b => b a -> a -> (Point a, Point a)
+evalBezierDeriv bc t = (b,b')
   where
-    (b,b',_,_) = evalBezierDerivs cb t
-{-# SPECIALIZE evalBezierDeriv :: CubicBezier Double -> Double -> (DPoint, DPoint) #-}    
-    
--- | Calculate a value and all derivatives on the curve.
-evalBezierDerivs :: Num a => CubicBezier a -> a -> (Point a, Point a, Point a, Point a)
-evalBezierDerivs (CubicBezier !a !b !c !d) t =
-  (interp abbc bccd,
-   3*^(bccd ^-^ abbc),
-   6*^(cd ^-^ 2*^bc ^+^ ab),
-   6*^(d ^+^ 3*^(b ^-^ c) ^-^ a))
-  where
-    mt = 1-t
-    interp !v !w = mt*^v ^+^ t*^w
-    ab = interp a b
-    bc = interp b c
-    cd = interp c d
-    abbc = interp ab bc
-    bccd = interp bc cd
-{-# SPECIALIZE evalBezierDerivs :: CubicBezier Double -> Double -> (DPoint, DPoint, DPoint, DPoint) #-}
-           
+    (b:b':_) = evalBezierDerivs bc t
+{-# INLINE evalBezierDeriv  #-}
+
 -- | @findBezierTangent p b@ finds the parameters where
 -- the tangent of the bezier curve @b@ has the same direction as vector p.
 
@@ -106,10 +177,9 @@ bezierVert :: CubicBezier Double -> [Double]
 bezierVert = findBezierTangent (Point 0 1)
 
 -- | Find inflection points on the curve.
-
--- Use the formula B''x(t) * B'y(t) - B''y(t) * B'x(t) = 0
--- with B'x(t) the x value of the first derivative at t,
--- B''y(t) the y value of the second derivative at t
+-- Use the formula B_x''(t) * B_y'(t) - B_y''(t) * B_x'(t) = 0 with
+-- B_x'(t) the x value of the first derivative at t, B_y''(t) the y
+-- value of the second derivative at t
 findBezierInflection :: CubicBezier Double -> [Double]
 findBezierInflection (CubicBezier (Point x0 y0) (Point x1 y1) (Point x2 y2) (Point x3 y3)) =
   filter bezierParam $ quadraticRoot a b c
@@ -184,19 +254,20 @@ arcLengthP !b !len !tot !t !dt !eps
         newDt = diff / vectorMag (snd $ evalBezierDeriv b t)
 
 -- | Split a bezier curve into two curves.
-splitBezier :: Num a => CubicBezier a -> a -> (CubicBezier a, CubicBezier a)
-splitBezier (CubicBezier a b c d) t =
-  let ab = interpolateVector a b t
-      bc = interpolateVector b c t
-      cd = interpolateVector c d t
-      abbc = interpolateVector ab bc t
-      bccd = interpolateVector bc cd t
-      mid = interpolateVector abbc bccd t
-  in (CubicBezier a ab abbc mid, CubicBezier mid bccd cd d)
+splitBezier :: (V.Unbox a, Fractional a) =>
+               GenericBezier b => b a -> a -> (b a, b a)
+splitBezier b t =
+  (unsafeFromVector $ V.zip (bernsteinCoeffs x1) (bernsteinCoeffs y1),
+   unsafeFromVector $ V.zip (bernsteinCoeffs x2) (bernsteinCoeffs y2))
+  where
+    (x, y) = bezierToBernstein b
+    (x1, x2) = bernsteinSplit x t
+    (y1, y2) = bernsteinSplit y t
 {-# SPECIALIZE splitBezier :: CubicBezier Double -> Double -> (CubicBezier Double, CubicBezier Double) #-}     
 
 -- | Return the subsegment between the two parameters.
-bezierSubsegment :: (Fractional a, Ord a) => CubicBezier a -> a -> a -> CubicBezier a
+bezierSubsegment :: (Ord a, V.Unbox a, Fractional a) => GenericBezier b =>
+                    b a -> a -> a -> b a
 bezierSubsegment b t1 t2 
   | t1 > t2   = bezierSubsegment b t2 t1
   | otherwise = snd $ flip splitBezier (t1/t2) $
@@ -206,7 +277,8 @@ bezierSubsegment b t1 t2
 -- | Split a bezier curve into a list of beziers
 -- The parameters should be in ascending order or
 -- the result is unpredictable.
-splitBezierN :: (Ord a, Fractional a) => CubicBezier a -> [a] -> [CubicBezier a]
+splitBezierN :: (Ord a, V.Unbox a, Fractional a) =>
+                GenericBezier b => b a -> [a] -> [b a]
 splitBezierN c [] = [c]
 splitBezierN c [t] = [a, b] where
   (a, b) = splitBezier c t

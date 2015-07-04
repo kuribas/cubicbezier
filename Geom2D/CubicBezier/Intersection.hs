@@ -7,7 +7,7 @@ import Geom2D
 import Geom2D.CubicBezier.Basic
 import Math.BernsteinPoly
 import Data.Maybe
-
+import qualified Data.Vector.Unboxed as V
 
 -- find the convex hull by comparing the angles of the vectors with
 -- the cross product and backtracking if necessary.
@@ -148,14 +148,14 @@ bezierIntersection p q eps = bezierClip p q 0 1 0 1 0 eps False
 -- | Find the zero of a 1D bezier curve of any degree.  Note that this
 -- can be used as a bernstein polynomial root solver by converting from
 -- the power basis to the bernstein basis.
-bezierFindRoot :: BernsteinPoly -- ^ the bernstein coefficients of the polynomial
+bezierFindRoot :: BernsteinPoly Double -- ^ the bernstein coefficients of the polynomial
                -> Double  -- ^ The lower bound of the interval 
                -> Double  -- ^ The upper bound of the interval
                -> Double  -- ^ The accuracy
                -> [Double] -- ^ The roots found
 bezierFindRoot p tmin tmax eps
   -- no intersection
-  | chop_interval == Nothing = []
+  | isNothing chop_interval = []
 
   -- not enough reduction, so split the curve in case we have
   -- multiple intersections
@@ -174,7 +174,7 @@ bezierFindRoot p tmin tmax eps
         bezierFindRoot newP new_tmin new_tmax eps
 
   where
-    chop_interval = chopHull 0 0 (bernsteinCoeffs p)
+    chop_interval = chopHull 0 0 (V.toList $ bernsteinCoeffs p)
     Just (chop_tmin, chop_tmax) = chop_interval
     newP = bernsteinSubsegment p chop_tmin chop_tmax
     clip = chop_tmax - chop_tmin

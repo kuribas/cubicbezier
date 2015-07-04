@@ -1,5 +1,3 @@
-{-# Language ViewPatterns #-}
-
 import Test.Tasty
 import Test.Tasty.HUnit
 import Geom2D.CubicBezier
@@ -7,9 +5,11 @@ import Control.Monad
 import Text.Parsec
 import Text.Parsec.String
 import Text.Parsec.Error
+import MPTest
+import NumTest
 
 tests :: TestTree
-tests = testGroup "Tests" [unitTests]
+tests = testGroup "Tests" [mfTests, numTests]
 
 num :: Parser Double
 num = 
@@ -186,8 +186,8 @@ testPath p1 p2 =
 
 -- These tests were created by running mf, typing expr after the
 -- prompt, and entering the metapaths.
-unitTests :: TestTree
-unitTests = testGroup "Metafont" [
+mfTests :: TestTree
+mfTests = testGroup "Metafont" [
   testPath "(0,0)..(4,3)"
   "(0,0)..controls (1.33333,1) and (2.66667,2) ..(4,3)",
 

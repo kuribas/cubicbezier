@@ -26,7 +26,7 @@ curvature' (CubicBezier c0 c1 c2 _c3) = 2/3 * b/a^(3::Int)
 radiusOfCurvature :: CubicBezier Double -> Double -> Double
 radiusOfCurvature b t = 1 / curvature b t
 
-extrema :: CubicBezier Double -> BernsteinPoly
+extrema :: CubicBezier Double -> BernsteinPoly Double
 extrema bez = 
   let (x, y) = bezierToBernstein bez
       x' = bernsteinDeriv x
@@ -45,7 +45,7 @@ curvatureExtrema b eps
   | otherwise = bezierFindRoot (extrema b) 0 1 $
                 bezierParamTolerance b eps
 
-radiusSquareEq :: CubicBezier Double -> Double -> BernsteinPoly
+radiusSquareEq :: CubicBezier Double -> Double -> BernsteinPoly Double
 radiusSquareEq bez d =
   let (x, y) = bezierToBernstein bez
       x' = bernsteinDeriv x

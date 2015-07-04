@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, MultiParamTypeClasses, FlexibleInstances, DeriveFunctor #-}
+{-# LANGUAGE TypeFamilies, MultiParamTypeClasses, FlexibleInstances, DeriveFunctor, FunctionalDependencies #-}
 
 -- | Basic 2 dimensional geometry functions.
 module Geom2D where
@@ -13,8 +13,8 @@ infixl 7 *^, ^*, ^/
 infixr 5 $*
 
 data Point a = Point {
-  pointX :: a,
-  pointY :: a}
+  pointX :: !a,
+  pointY :: !a}
              deriving (Eq, Functor)
 
 type DPoint = Point Double
@@ -25,12 +25,12 @@ instance Show a => Show (Point a) where
 
 -- | A transformation (x, y) -> (ax + by + c, dx + ey + d)
 data Transform a = Transform {
-  xformA :: a,
-  xformB :: a,
-  xformC :: a,
-  xformD :: a,
-  xformE :: a,
-  xformF :: a }
+  xformA :: !a,
+  xformB :: !a,
+  xformC :: !a,
+  xformD :: !a,
+  xformE :: !a,
+  xformF :: !a }
                  deriving (Eq, Show, Functor)
 
 data Line a = Line (Point a) (Point a)
@@ -38,7 +38,7 @@ data Line a = Line (Point a) (Point a)
 data Polygon a = Polygon [Point a]
                deriving (Show, Eq, Functor)
 
-class AffineTransform a b where
+class AffineTransform a b | a -> b where
   transform :: Transform b -> a -> a
 
 instance Num a => AffineTransform (Transform a) a where
@@ -132,7 +132,19 @@ lineEquation (Line (Point x1 y1) (Point x2 y2)) = (a, b, c)
 lineDistance :: Floating a => Line a -> Point a -> a
 lineDistance l = \(Point x y) -> a*x + b*y + c
   where (a, b, c) = lineEquation l
-{-# SPECIALIZE lineDistance :: Line Double -> DPoint -> Double #-}        
+{-# SPECIALIZE lineDistance :: Line Double -> DPoint -> Double #-}
+
+-- | Return the point on the line closest to the given point.
+closestPoint :: Fractional a => Line a -> Point a -> Point a
+closestPoint (Line p1 p2) p3 = Point px py
+  where
+    (Point dx dy) = p2 ^-^ p1
+    u = dy*pointY p3 + dx*pointX p3
+    v = pointX p1*pointY p2 - pointX p2*pointY p1
+    m = dx*dx + dy*dy
+    px = (dx*u + dy*v) / m
+    py = (dy*u - dx*v) / m
+{-# specialize closestPoint :: Line Double -> Point Double -> Point Double #-}  
 
 -- | The lenght of the vector.
 vectorMag :: Floating a => Point a -> a
@@ -154,6 +166,7 @@ dirVector angle = Point (cos angle) (sin angle)
 normVector :: Floating a => Point a -> Point a
 normVector p@(Point x y) = Point (x/l) (y/l)
   where l = vectorMag p
+{-# INLINE normVector #-}        
 
 -- | Scale vector by constant.
 (*^) :: Num a => a -> Point a -> Point a
@@ -220,12 +233,12 @@ rotate a = Transform (cos a) (negate $ sin a) 0
 {-# INLINE rotate #-}
 
 -- | Rotate vector 90 degrees left.
-rotate90L :: Transform Double
+rotate90L :: Floating s => Transform s
 rotate90L = rotateVec (Point 0 1)
 {-# INLINE rotate90L #-}
 
 -- | Rotate vector 90 degrees right.
-rotate90R :: Transform Double
+rotate90R :: Floating s => Transform s
 rotate90R = rotateVec (Point 0 (-1))
 {-# INLINE rotate90R #-}
 

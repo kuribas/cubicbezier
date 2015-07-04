@@ -64,29 +64,29 @@ import qualified Data.Vector as V
 
 data MetaPath a = OpenMetaPath [(Point a, MetaJoin a)] (Point a)
                 -- ^ A metapath with endpoints
-              | CyclicMetaPath [(Point a, MetaJoin a)]
-                -- ^ A metapath with cycles.  The last join joins the
-                -- last point with the first.
-              deriving (Eq, Functor)
+                | CyclicMetaPath [(Point a, MetaJoin a)]
+                  -- ^ A metapath with cycles.  The last join joins the
+                  -- last point with the first.
+                deriving (Eq, Functor)
 
 data MetaJoin a = MetaJoin { metaTypeL :: MetaNodeType a
                            -- ^ The nodetype going out of the
                            -- previous point.  The metafont default is
                            -- @Open@.
-                         , tensionL :: Tension
-                           -- ^ The tension going out of the previous point.
-                           -- The metafont default is 1.
-                         , tensionR :: Tension
-                           -- ^ The tension going into the next point.
-                           -- The metafont default is 1.
-                         , metaTypeR :: MetaNodeType a
-                           -- ^ The nodetype going into the next point.
-                           -- The metafont default is @Open@.
-                         }
-              | Controls (Point a) (Point a)
-                -- ^ Specify the control points explicitly.
-              deriving (Show, Eq, Functor)
-
+                           , tensionL :: Tension
+                             -- ^ The tension going out of the previous point.
+                             -- The metafont default is 1.
+                           , tensionR :: Tension
+                             -- ^ The tension going into the next point.
+                             -- The metafont default is 1.
+                           , metaTypeR :: MetaNodeType a
+                             -- ^ The nodetype going into the next point.
+                             -- The metafont default is @Open@.
+                           }
+                | Controls (Point a) (Point a)
+                  -- ^ Specify the control points explicitly.
+                deriving (Show, Eq, Functor)
+                         
 data MetaNodeType a = Open
                     -- ^ An open node has no direction specified.  If
                     -- it is an internal node, the curve will keep the
@@ -347,7 +347,6 @@ solveTriDiagonal2 (!b0, !c0, !d0) rows = solutions
 -- test = ((80.0,58.0,51.0),[(-432.0,78.0,102.0,503.0),(71.0,-82.0,20.0,2130.0),(52.39,-10.43,4.0,56.0),(34.0,38.0,0.0,257.0)])
 -- [-15.726940528143576,22.571642107784243,-78.93751365259996,-297.27313545829384,272.74438435742667]
       
-     
 -- solve the cyclic tridiagonal system.
 -- see metafont the program: ¶ 286
 solveCyclicTriD :: [(Double, Double, Double, Double)] -> [Double]
