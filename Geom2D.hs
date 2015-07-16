@@ -219,6 +219,11 @@ rotateScaleVec :: Num a => Point a -> Transform a
 rotateScaleVec (Point x y) = Transform x (-y) 0 y x 0
 {-# INLINE rotateScaleVec #-}
 
+-- | reflect the vector over the X-axis.
+flipVector :: (Num a) => Point a -> Point a
+flipVector (Point x y) = Point x (-y)
+{-# INLINE flipVector #-}
+
 -- | Create a transform that rotates by the angle of the given vector
 -- with the x-axis
 rotateVec :: Floating a => Point a -> Transform a

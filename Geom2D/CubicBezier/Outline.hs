@@ -25,7 +25,7 @@ bezierOffset :: CubicBezier Double -- ^ The curve
              -> Double      -- ^ Tolerance.
              -> [CubicBezier Double]        -- ^ The offset curve
 bezierOffset cb dist (Just m) tol =
-  approximatePathMax m (bezierOffsetPoint cb dist) 15 tol 0 1
+  approximatePathMax m (bezierOffsetPoint cb dist) 15 tol 0 1 False
 
 bezierOffset cb dist Nothing tol =
-  approximatePath (bezierOffsetPoint cb dist) 15 tol 0 1
+  approximatePath (bezierOffsetPoint cb dist) 15 tol 0 1 False

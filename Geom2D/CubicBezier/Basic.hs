@@ -3,7 +3,7 @@ module Geom2D.CubicBezier.Basic
        (CubicBezier (..), QuadBezier (..), AnyBezier (..), GenericBezier (..),
         PathJoin (..), Path (..), AffineTransform (..), 
         bezierParam, bezierParamTolerance, reorient, bezierToBernstein,
-        evalBezier, evalBezierDeriv, findBezierTangent,
+        evalBezier, evalBezierDeriv, findBezierTangent, quadToCubic,
         bezierHoriz, bezierVert, findBezierInflection, findBezierCusp,
         arcLength, arcLengthParam, splitBezier, bezierSubsegment, splitBezierN,
         colinear)
@@ -38,6 +38,7 @@ class GenericBezier b where
   evalBezierDerivs :: (Fractional a, V.Unbox a) => b a -> a -> [Point a]
 
 instance GenericBezier CubicBezier where
+  {-# INLINE evalBezierDerivs #-}
   degree _ = 3
   toVector (CubicBezier (Point ax ay) (Point bx by)
             (Point cx cy) (Point dx dy)) =
@@ -68,7 +69,9 @@ instance GenericBezier CubicBezier where
       p'' = 2*u*^(db^-^da) ^+^ 2*t*^(dc^-^db)
       p''' = 2*^(dc^-^2*^db^+^da)
 
+
 instance GenericBezier QuadBezier where
+  {-# INLINE evalBezierDerivs #-}
   degree _ = 2
   toVector (QuadBezier (Point ax ay) (Point bx by)
             (Point cx cy)) =
@@ -91,9 +94,9 @@ instance GenericBezier QuadBezier where
       p = u*^(u*^a ^+^ 2*t*^b) ^+^ t2*^c
       p' = 2*^(u*^(b^-^a) ^+^ t*^(c^-^b))
       p'' = 2*^(c^-^ 2*^b ^+^ a)
-      
 
 instance GenericBezier AnyBezier where
+  {-# INLINE evalBezierDerivs #-}
   degree (AnyBezier b) = V.length b
   toVector (AnyBezier v) = v
   unsafeFromVector = AnyBezier
@@ -252,6 +255,13 @@ arcLengthP !b !len !tot !t !dt !eps
   | otherwise = arcLengthP b len tot (t - newDt) newDt eps
   where diff = arcLength b t (max (abs (dt*tot/50)) (eps/2)) - len
         newDt = diff / vectorMag (snd $ evalBezierDeriv b t)
+
+-- | Convert a quadratic bezier to a cubic bezier.
+quadToCubic :: (Fractional a) =>
+               QuadBezier a -> CubicBezier a
+quadToCubic (QuadBezier a b c) =
+  CubicBezier a (1/3*^(a ^+^ 2*^b)) (1/3*^(2*^b ^+^ c)) c
+{-# INLINE quadToCubic  #-}  
 
 -- | Split a bezier curve into two curves.
 splitBezier :: (V.Unbox a, Fractional a) =>
