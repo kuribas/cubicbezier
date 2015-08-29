@@ -54,7 +54,8 @@
 -- as the first point.
 
 module Geom2D.CubicBezier.MetaPath
-       (unmeta, MetaPath (..), MetaJoin (..), MetaNodeType (..), Tension (..))
+       (unmetaOpen, unmetaClosed, ClosedMetaPath(..), OpenMetaPath (..),
+        MetaJoin (..), MetaNodeType (..), Tension (..))
 where
 import Geom2D
 import Geom2D.CubicBezier.Basic
@@ -62,12 +63,12 @@ import Data.List
 import Text.Printf
 import qualified Data.Vector as V
 
-data MetaPath a = OpenMetaPath [(Point a, MetaJoin a)] (Point a)
-                -- ^ A metapath with endpoints
-                | CyclicMetaPath [(Point a, MetaJoin a)]
-                  -- ^ A metapath with cycles.  The last join joins the
-                  -- last point with the first.
-                deriving (Eq, Functor)
+data OpenMetaPath a = OpenMetaPath [(Point a, MetaJoin a)] (Point a)
+                      -- ^ A metapath with endpoints
+data ClosedMetaPath a = ClosedMetaPath [(Point a, MetaJoin a)]
+                        -- ^ A metapath with cycles.  The last join
+                        -- joins the last point with the first.
+                      deriving (Eq, Functor)
 
 data MetaJoin a = MetaJoin { metaTypeL :: MetaNodeType a
                            -- ^ The nodetype going out of the
@@ -114,9 +115,11 @@ data Tension = Tension {tensionValue :: Double}
                -- there is one.
              deriving (Eq, Show)
 
-instance Show a => Show (MetaPath a) where
-  show (CyclicMetaPath nodes) =
+instance Show a => Show (ClosedMetaPath a) where
+  show (ClosedMetaPath nodes) =
     showPath nodes ++ "cycle"
+
+instance Show a => Show (OpenMetaPath a) where
   show (OpenMetaPath nodes lastpoint) =
     showPath nodes ++ showPoint lastpoint
 
@@ -143,11 +146,22 @@ showPoint :: Show a => Point a -> String
 showPoint (Point x y) = "(" ++ show x ++ ", " ++ show y ++ ")"
 
 -- | Create a normal path from a metapath.
-unmeta :: MetaPath Double -> Path Double
-unmeta (OpenMetaPath nodes endpoint) =
-  unmetaOpen (flip sanitize endpoint $ removeEmptyDirs nodes) endpoint
+unmetaOpen :: OpenMetaPath Double -> OpenPath Double
+unmetaOpen (OpenMetaPath nodes endpoint) =
+  unmetaOpen' (flip sanitize endpoint $
+              removeEmptyDirs nodes)
+  endpoint
 
-unmeta (CyclicMetaPath nodes) =
+unmetaOpen' :: [(DPoint, MetaJoin Double)] -> DPoint -> OpenPath Double
+unmetaOpen' nodes endpoint =
+  let subsegs = openSubSegments nodes endpoint
+      path = joinSegments $ map unmetaSubSegment subsegs
+  in OpenPath path endpoint
+
+
+
+unmetaClosed :: ClosedMetaPath Double -> ClosedPath Double
+unmetaClosed (ClosedMetaPath nodes) =
   case spanList bothOpen (removeEmptyDirs nodes) of
     ([], []) -> error "empty metapath"
     (l, []) -> if fst (last l) == fst (head l)
@@ -161,21 +175,15 @@ unmeta (CyclicMetaPath nodes) =
 -- solve a cyclic metapath as an open path if possible.
 -- rotate to the defined node, and rotate back after
 -- solving the path.
-unmetaAsOpen :: [(DPoint, MetaJoin Double)] -> [(DPoint, MetaJoin Double)] -> Path Double
+unmetaAsOpen :: [(DPoint, MetaJoin Double)] -> [(DPoint, MetaJoin Double)] -> ClosedPath Double
 unmetaAsOpen l m = ClosedPath (l'++m') 
   where n = length m
         OpenPath o _ =
-          unmetaOpen (sanitizeCycle (m++l)) (fst $ head (m ++l))
+          unmetaOpen' (sanitizeCycle (m++l)) (fst $ head (m ++l))
         (m',l') = splitAt n o
 
-unmetaOpen :: [(DPoint, MetaJoin Double)] -> DPoint -> Path Double
-unmetaOpen nodes endpoint =
-  let subsegs = openSubSegments nodes endpoint
-      path = joinSegments $ map unmetaSubSegment subsegs
-  in OpenPath path endpoint
-
 -- decompose into a list of subsegments that need to be solved.
-openSubSegments :: [(DPoint, MetaJoin Double)] -> DPoint -> [MetaPath Double]
+openSubSegments :: [(DPoint, MetaJoin Double)] -> DPoint -> [OpenMetaPath Double]
 openSubSegments [] _   = []
 openSubSegments l lastPoint =
   case spanList (not . breakPoint) l of
@@ -188,13 +196,13 @@ openSubSegments l lastPoint =
     _ -> error "openSubSegments': unexpected end of segments"
 
 -- join subsegments into one segment
-joinSegments :: [Path Double] -> [(DPoint, PathJoin Double)]
+joinSegments :: [OpenPath Double] -> [(DPoint, PathJoin Double)]
 joinSegments = concatMap nodes
   where nodes (OpenPath n _) = n
-        nodes (ClosedPath n) = n
+        --nodes (ClosedPath n) = n
 
 -- solve a cyclic metapath where all angles depend on the each other.
-unmetaCyclic :: [(DPoint, MetaJoin Double)] -> Path Double
+unmetaCyclic :: [(DPoint, MetaJoin Double)] -> ClosedPath Double
 unmetaCyclic nodes =
   let points = map fst nodes
       chords = zipWith (^-^) (tail $ cycle points) points
@@ -212,7 +220,7 @@ unmetaCyclic nodes =
      thetas phis tensionsA tensionsB
 
 -- solve a subsegment
-unmetaSubSegment :: MetaPath Double -> Path Double
+unmetaSubSegment :: OpenMetaPath Double -> OpenPath Double
 
 -- the simple case where the control points are already given.
 unmetaSubSegment (OpenMetaPath [(p, Controls u v)] q) =
@@ -234,8 +242,6 @@ unmetaSubSegment (OpenMetaPath nodes lastpoint) =
       pathjoins =
         zipWith6 unmetaJoin points (tail points) thetas phis tensionsA tensionsB
   in OpenPath (zip points pathjoins) lastpoint
-
-unmetaSubSegment _ = error "unmetaSubSegment: subsegment should not be cyclic"
 
 removeEmptyDirs :: [(DPoint, MetaJoin Double)] -> [(DPoint, MetaJoin Double)]
 removeEmptyDirs = map remove
@@ -462,7 +468,7 @@ eqCurlN gamma tensionA tensionB = (a, b, 0, 0)
 -- getting the control points
 unmetaJoin :: DPoint -> DPoint -> Double -> Double -> Tension -> Tension -> PathJoin Double
 unmetaJoin !z0 !z1 !theta !phi !alpha !beta
-  | abs phi < 1e-4 && abs theta < 1e-4 = JoinLine z1
+  | abs phi < 1e-4 && abs theta < 1e-4 = JoinLine
   | otherwise = JoinCurve u v
   where Point dx dy = z1^-^z0
         bounded = (sf <= 0 && st <= 0 && sf <= 0) ||

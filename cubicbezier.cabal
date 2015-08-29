@@ -11,8 +11,7 @@ Maintainer:	Kristof Bastiaensen
 Bug-Reports: 	https://github.com/kuribas/cubicbezier/issues
 Build-type:	Simple
 Cabal-version:	>=1.8
-Description:	This library supports efficient manipulating of 2D cubic bezier curves.  The original goal
-  is to support typography, but it is useful for general graphics.  Supported features are:
+Description:	This library supports efficient manipulating of 2D cubic bezier curves, for use in graphics or typography.  Supported features are:
   .
   Evaluating bezier curves and derivatives, affine transformations on bezier curves, arclength and inverse arclength, intersections between two curves, intersection between a curve and a line, curvature and radius of curvature, finding tangents parallel to a vector, finding inflection points and cusps.
   .
@@ -27,7 +26,8 @@ source-repository head
 
 Library
   Ghc-options: -Wall -fllvm -O1
-  Build-depends: base >= 3 && < 5, containers > 0.4, integration >= 0.1.1, vector >= 0.10, matrices >= 0.4.1
+  Build-depends: base >= 3 && < 5, containers >= 0.5.3, integration >= 0.1.1, vector >= 0.10,
+                 matrices >= 0.4.1, microlens >= 0.1.2, microlens-th >= 0.1.2, microlens-mtl >= 0.1.2, mtl >= 2.1.1
   Exposed-Modules:
     Geom2D
     Geom2D.CubicBezier
@@ -37,6 +37,7 @@ Library
     Geom2D.CubicBezier.Curvature
     Geom2D.CubicBezier.Intersection
     Geom2D.CubicBezier.MetaPath
+    Geom2D.CubicBezier.Overlap
     Math.BernsteinPoly
     Geom2D.CubicBezier.Numeric
 

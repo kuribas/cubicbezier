@@ -8,6 +8,10 @@ import qualified Data.Matrix.Unboxed.Mutable as MM
 import Control.Monad.ST
 import Control.Monad
 
+
+sign x | x < 0 = -1
+       | otherwise = 1
+
 -- | @quadraticRoot a b c@ find the real roots of the quadratic equation
 -- @a x^2 + b x + c = 0@.  It will return one, two or zero roots.
 
@@ -18,7 +22,7 @@ quadraticRoot a b c
   | otherwise = result
   where
     d = b*b - 4*a*c
-    q = - (b + signum b * sqrt d) / 2
+    q = - (b + sign b * sqrt d) / 2
     x1 = q/a
     x2 = c/q
     result | d < 0     = []

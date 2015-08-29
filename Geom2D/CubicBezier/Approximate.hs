@@ -257,7 +257,6 @@ approx1cubic n f t0 t1 maxiter =
              (V.enumFromN 1 n :: V.Vector Int)
         points = V.map (fst . f . interpolate t0 t1) ts
         curveCb = CubicBezier p0 (p0^+^p0') (p1^+^p1') p1
-
 {-# SPECIALIZE approx1cubic ::  Int -> (Double -> (Point Double, Point Double)) -> Double -> Double -> Int -> (CubicBezier Double, Double) #-}
 
 -- | @approximateCubic b pts maxiter@ finds the least squares fit of a bezier

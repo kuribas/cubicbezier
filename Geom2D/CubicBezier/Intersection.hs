@@ -8,6 +8,7 @@ import Geom2D.CubicBezier.Basic
 import Math.BernsteinPoly
 import Data.Maybe
 import qualified Data.Vector.Unboxed as V
+import Debug.Trace
 
 -- find the convex hull by comparing the angles of the vectors with
 -- the cross product and backtracking if necessary.
@@ -16,13 +17,13 @@ findOuter' !upper !dir !p1 l@(p2:rest)
   -- backtrack if the direction is outward
   | if upper
     then dir `vectorCross` (p2^-^p1) > 0 -- left turn
-    else dir `vectorCross` (p2^-^p1) < 0 = Left $! l
+    else dir `vectorCross` (p2^-^p1) < 0 = Left l
   -- succeed
   | otherwise = case findOuter' upper (p2^-^p1) p2 rest of
     Left m -> findOuter' upper dir p1 m
     Right m -> Right (p1:m)
 
-findOuter' _ _ p1 p = Right $! (p1:p)
+findOuter' _ _ p1 p = Right (p1:p)
 
 -- find the outermost point.  It doesn't look at the x values.
 findOuter :: Bool -> [DPoint] -> [DPoint]
@@ -50,7 +51,7 @@ testBelow !dmin (p:q:rest) cont
   | pointY p >= dmin = cont
   | pointY p > pointY q = Nothing
   | pointY q < dmin = testBelow dmin (q:rest) cont
-  | otherwise = Just $! intersectPt dmin p q
+  | otherwise = Just $ intersectPt dmin p q
 
 testBetween :: Double -> DPoint -> Maybe Double -> Maybe Double
 testBetween !dmax (Point !x !y) cont
@@ -64,13 +65,15 @@ testAbove _    [_] = Nothing
 testAbove dmax (p:q:rest)
   | pointY p < pointY q = Nothing
   | pointY q > dmax = testAbove dmax (q:rest)
-  | otherwise = Just $! intersectPt dmax p q
+  | otherwise = Just $ intersectPt dmax p q
 
 -- find the x value where the line through the two points
 -- intersect the line y=d
 intersectPt :: Double -> DPoint -> DPoint -> Double
-intersectPt d (Point x1 y1) (Point x2 y2) =
-  x1 + (d  - y1) * (x2 - x1) / (y2 - y1)
+intersectPt d (Point x1 y1) (Point x2 y2)
+  | y1 == y2 = x1
+  | otherwise =
+    x1 + (d - y1) * (x2 - x1) / (y2 - y1)
 
 -- make a hull and test over which interval the
 -- curve is garuanteed to lie inside the fat line
@@ -90,7 +93,6 @@ bezierClip :: CubicBezier Double -> CubicBezier Double -> Double -> Double
            -> [(Double, Double)]
 bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
   tmin tmax umin umax prevClip eps revCurves
-
   -- no intersection
   | isNothing chop_interval = []
 
@@ -105,23 +107,36 @@ bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
   -- not enough reduction, so split the curve in case we have
   -- multiple intersections
   | prevClip > 0.8 && newClip > 0.8 =
-    if new_tmax - new_tmin > umax - umin -- split the longest segment
-    then let
-      (pl, pr) = splitBezier newP 0.5
-      half_t = new_tmin + (new_tmax - new_tmin) / 2
-      in bezierClip q pl umin umax new_tmin half_t newClip eps (not revCurves) ++
-         bezierClip q pr umin umax half_t new_tmax newClip eps (not revCurves)
-    else let
-      (ql, qr) = splitBezier q 0.5
-      half_t = umin + (umax - umin) / 2
-      in bezierClip ql newP umin half_t new_tmin new_tmax newClip eps (not revCurves) ++
-         bezierClip qr newP half_t umax new_tmin new_tmax newClip eps (not revCurves)
-
+    if | abs (dmax - dmin) < eps * vectorDistance p0 p3 ->
+         -- fat line is smaller than tolerance.
+         if revCurves
+         then [(umin, tmin), (umax, tmax)]
+         else [(tmin, umin), (umin, tmin)]
+       | new_tmax - new_tmin > umax - umin ->
+         -- split the longest segment
+         let (pl, pr) = splitBezier newP 0.5
+             half_t = new_tmin + (new_tmax - new_tmin) / 2
+         in bezierClip q pl umin umax new_tmin half_t
+            newClip eps (not revCurves) ++
+            bezierClip q pr umin umax half_t new_tmax
+            newClip eps (not revCurves)
+       | otherwise ->
+         let (ql, qr) = splitBezier q 0.5
+             half_t = umin + (umax - umin) / 2
+         in bezierClip ql newP umin half_t
+            new_tmin new_tmax newClip eps (not revCurves) ++
+            bezierClip qr newP half_t umax new_tmin new_tmax
+            newClip eps (not revCurves)
   -- iterate with the curves reversed.
-  | otherwise = bezierClip q newP umin umax new_tmin new_tmax newClip eps (not revCurves)
+  | otherwise =
+      bezierClip q newP umin umax new_tmin
+      new_tmax newClip eps (not revCurves)
 
   where
-    d = lineDistance (Line q0 q3)
+    q3' | q0 == q3 =
+            q0 ^+^ (rotate90L $* p3 ^-^ p0)
+        | otherwise = q3
+    d = lineDistance (Line q0 q3')
     d1 = d q1
     d2 = d q2
     (dmin, dmax) | d1*d2 > 0 = (3/4 * minimum [0, d1, d2],
@@ -136,10 +151,18 @@ bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
     new_tmin = tmax * chop_tmin + tmin * (1 - chop_tmin)
     new_tmax = tmax * chop_tmax + tmin * (1 - chop_tmax)
 
+maxEps = 1e-8
+
 -- | Find the intersections between two Bezier curves, using the
 -- Bezier Clip algorithm. Returns the parameters for both curves.
 bezierIntersection :: CubicBezier Double -> CubicBezier Double -> Double -> [(Double, Double)]
-bezierIntersection p q eps = bezierClip p q 0 1 0 1 0 eps False
+bezierIntersection p q eps = bezierClip p q 0 1 0 1 0 eps2 False
+  where eps2 = max eps maxEps
+
+-- TODO:
+-- following curve generate very large list of intersections
+-- let b1 =  CubicBezier {cubicC0 = Point 365.70000000000005 477.40000000000003, cubicC1 = Point 373.3 476.70000000000005, cubicC2 = Point 381.1 476.3, cubicC3 = Point 389.20000000000005 476.3};
+--     b2 = CubicBezier {cubicC0 = Point 365.70000000000005 477.40000000000003, cubicC1 = Point 365.70000000000005 476.6, cubicC2 = Point 365.70000000000005 475.8, cubicC3 = Point 365.70000000000005 475.0}
 
 ------------------------ Line intersection -------------------------------------
 -- Clipping a line uses a simplified version of the Bezier Clip algorithm,

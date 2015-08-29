@@ -1,16 +1,15 @@
 {-# LANGUAGE BangPatterns, ViewPatterns #-}
-module Math.BernsteinPoly
-       (BernsteinPoly(..), bernsteinSubsegment, listToBernstein, zeroPoly,
-        (~*), (*~), (~+), (~-), degreeElevate, bernsteinSplit, bernsteinEval,
-        bernsteinEvalDeriv, binCoeff, convolve, bernsteinEvalDerivs, bernsteinDeriv)
-       where
-
 -- | Algebra on polynomials in the Bernstein form.  It is based on the
 -- paper /Algebraic manipulation in the Bernstein form made simple via
 -- convolutions/ by J. Sanchez-Reyes.  It's an efficient
 -- implementation using the scaled basis, and using ghc rewrite rules
 -- to eliminate intermediate polynomials.
 
+module Math.BernsteinPoly
+       (BernsteinPoly(..), bernsteinSubsegment, listToBernstein, zeroPoly,
+        (~*), (*~), (~+), (~-), degreeElevate, bernsteinSplit, bernsteinEval,
+        bernsteinEvalDeriv, binCoeff, convolve, bernsteinEvalDerivs, bernsteinDeriv)
+       where
 import Data.Vector.Unboxed as V
 import qualified Data.Vector as B
 
@@ -31,13 +30,13 @@ toScaled :: (Unbox a, Num a) => BernsteinPoly a -> ScaledPoly a
 toScaled (BernsteinPoly v) =
   ScaledPoly $
   V.zipWith (*) v $ binCoeff $ V.length v - 1
-{-# NOINLINE toScaled #-}
+{-# NOINLINE[2] toScaled #-}
 
 fromScaled :: (Unbox a, Fractional a) => ScaledPoly a -> BernsteinPoly a
 fromScaled (ScaledPoly v) =
     BernsteinPoly $
     V.zipWith (/) v $ binCoeff $ V.length v - 1
-{-# NOINLINE fromScaled #-}
+{-# NOINLINE[2] fromScaled #-}
 
 -- | Create a bernstein polynomail from a list of coëfficients.
 listToBernstein :: (Unbox a, Num a) => [a] -> BernsteinPoly a
@@ -104,7 +103,8 @@ degreeElevateScaled :: (Unbox a, Num a)
 degreeElevateScaled b@(ScaledPoly p) times
   | times <= 0 = b
   | otherwise = ScaledPoly $ convolve (binCoeff times) p
-{-# SPECIALIZE degreeElevateScaled :: ScaledPoly Double -> Int -> ScaledPoly Double #-}                
+{-# SPECIALIZE degreeElevateScaled :: ScaledPoly Double ->
+    Int -> ScaledPoly Double #-}                
 
 degreeElevate :: (Unbox a, Fractional a)
                  => BernsteinPoly a -> Int -> BernsteinPoly a
@@ -158,7 +158,8 @@ bernsteinDeriv (BernsteinPoly v) =
   BernsteinPoly $
   V.map (* fromIntegral (V.length v - 1)) $
   V.zipWith (-) (V.tail v) v
-{-# SPECIALIZE bernsteinDeriv :: BernsteinPoly Double -> BernsteinPoly Double #-}  
+{-# SPECIALIZE bernsteinDeriv :: BernsteinPoly Double ->
+    BernsteinPoly Double #-}  
 
 -- | Split a bernstein polynomial
 bernsteinSplit :: (Unbox a, Num a) =>
@@ -172,7 +173,8 @@ bernsteinSplit (BernsteinPoly v) t =
     interp a b = (1-t)*a + t*b
     interpVecs = B.iterateN (V.length v) interpVec v
     interpVec v2 = V.zipWith interp v2 (V.tail v2)
-{-# SPECIALIZE bernsteinSplit :: BernsteinPoly Double -> Double -> (BernsteinPoly Double, BernsteinPoly Double) #-}
+{-# SPECIALIZE bernsteinSplit :: BernsteinPoly Double -> Double ->
+    (BernsteinPoly Double, BernsteinPoly Double) #-}
 
 addScaled :: (Unbox a, Num a) => ScaledPoly a -> ScaledPoly a -> ScaledPoly a
 addScaled ba@(ScaledPoly a) bb@(ScaledPoly b)
@@ -183,10 +185,11 @@ addScaled ba@(ScaledPoly a) bb@(ScaledPoly b)
   | otherwise = ScaledPoly $ V.zipWith (+) a b
   where la = V.length a
         lb = V.length b
-{-# SPECIALIZE addScaled :: ScaledPoly Double -> ScaledPoly Double -> ScaledPoly Double #-}        
+{-# SPECIALIZE addScaled :: ScaledPoly Double -> ScaledPoly Double ->
+    ScaledPoly Double #-}        
 
--- | Sum two bernstein polynomials.  The final degree will be the maximum of either
--- degrees.
+-- | Sum two bernstein polynomials.  The final degree will be the
+-- maximum of either degrees.
 (~+) :: (Unbox a, Fractional a) =>
         BernsteinPoly a -> BernsteinPoly a -> BernsteinPoly a
 (toScaled -> a) ~+ (toScaled -> b) = fromScaled $ addScaled a b
@@ -201,10 +204,11 @@ subScaled ba@(ScaledPoly a) bb@(ScaledPoly b)
   | otherwise = ScaledPoly $ V.zipWith (-) a b
   where la = V.length a
         lb = V.length b
-{-# SPECIALIZE subScaled :: ScaledPoly Double -> ScaledPoly Double -> ScaledPoly Double #-}        
+{-# SPECIALIZE subScaled :: ScaledPoly Double -> ScaledPoly Double ->
+    ScaledPoly Double #-}        
 
--- | Subtract two bernstein polynomials.  The final degree will be the maximum of either
--- degrees.
+-- | Subtract two bernstein polynomials.  The final degree will be the
+-- maximum of either degrees.
 (~-) :: (Unbox a, Fractional a) =>
         BernsteinPoly a -> BernsteinPoly a -> BernsteinPoly a
 
@@ -214,3 +218,4 @@ subScaled ba@(ScaledPoly a) bb@(ScaledPoly b)
 -- | Scale a bernstein polynomial by a constant.
 (*~) :: (Unbox a, Num a) => a -> BernsteinPoly a -> BernsteinPoly a
 a *~ (BernsteinPoly v) = BernsteinPoly (V.map (*a) v)
+{-# INLINE (*~) #-}
