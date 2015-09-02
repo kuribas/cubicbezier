@@ -1,5 +1,5 @@
 Name:		cubicbezier
-Version: 	0.3.0
+Version: 	0.4.0
 Synopsis:	Efficient manipulating of 2D cubic bezier curves.
 Category: 	Graphics, Geometry, Typography
 Copyright: 	Kristof Bastiaensen (2014)
@@ -35,9 +35,9 @@ Library
     Geom2D.CubicBezier.Approximate
     Geom2D.CubicBezier.Outline
     Geom2D.CubicBezier.Curvature
+    Geom2D.CubicBezier.Overlap
     Geom2D.CubicBezier.Intersection
     Geom2D.CubicBezier.MetaPath
-    Geom2D.CubicBezier.Overlap
     Math.BernsteinPoly
     Geom2D.CubicBezier.Numeric
 

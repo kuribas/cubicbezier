@@ -36,12 +36,13 @@ interpreted in a mutable language as follows:
 Let's begin with declaring the module and library imports:
 
 > module Geom2D.CubicBezier.Overlap
-> --       (boolPathOp, union, intersection, difference,
-> --       exclusion)
+>        (boolPathOp, union, intersection, difference,
+>         exclusion)
 >        where
 > import Prelude hiding (mapM)
 > import Geom2D
-> import Geom2D.CubicBezier
+> import Geom2D.CubicBezier.Basic
+> import Geom2D.CubicBezier.Intersection
 > import Math.BernsteinPoly
 > import Data.Traversable (mapM)
 > import Data.Functor ((<$>))
@@ -52,7 +53,6 @@ Let's begin with declaring the module and library imports:
 > import Lens.Micro.Mtl
 > import qualified Data.Map.Strict as M
 > import qualified Data.Set as S
-> import Debug.Trace
 
 So what does it mean to remove overlap?  Basicly we want to keep
 curves where one side is inside the filled region, and the other side
@@ -421,34 +421,20 @@ below instead.  Adjust the turnRatios for each curve.
 >       (PointEvent p, curves) <- xStructRemove
 >       -- change focus, and remove curves ending at current
 >       -- pointevent from Y structure
->       traceShow curves $ do
->       traceShow ("pointEvent: " ++ show p) $ do
->       lStr <- use yStructLeft
->       rStr <- use yStructRight
->       traceShow (lStr, rStr) $ do
 >       ending <- splitYStruct p trOne
->       lStr <- use yStructLeft
->       rStr <- use yStructRight
->       traceShow (lStr, rStr) $ do
 >       -- split near curves
->       traceShow "splitNearPoints" $ do
 >       (ending2, rightSubCurves) <- splitNearPoints p tol
->       traceShow "filter output" $ do
 >       -- output curves to the left of the sweepline.
 >       modify $ filterOutput (ending ++ ending2) isInside 
 >       let allCurves = rightSubCurves ++ curves
 >       if null allCurves
 >          -- split surrounding curves
->         then traceShow "splitSurround" $
->              splitSurround tol
+>         then splitSurround tol
 >         else do
->         traceShow "sort" $ do 
 >         -- sort curves
 >         sorted <- splitAndOrder tol allCurves
->         traceShow "splitAbove" $ do
 >         -- split curve above
 >         curves2 <- splitAbove trOne sorted tol
->         traceShow "addmidcurves" $ do
 >         -- add curves to Y structure
 >         addMidCurves curves2 tol
 
@@ -481,8 +467,7 @@ Send curves to output
 >           outputNext m
 >       | otherwise =
 >         case lookupDelete p m of
->          Nothing -> trace ("Point not found: " ++ show p) $
->                     outputNext m
+>          Nothing -> outputNext m
 >          Just (x, m') -> go m' x (next:prev) start
 >       where p = cubicC3 next
 >
@@ -507,7 +492,7 @@ output map.
 >       let c' | isInside tr = reorient c
 >              | otherwise = c
 >       in over output (M.insertWith (++) (PointEvent $ cubicC0 c') [c'])
->   | otherwise = trace ("deleting: " ++ show c) $ id
+>   | otherwise = id
 
 Test for intersections and split:
 ---------------------------------
@@ -938,7 +923,6 @@ Higher level functions
 >          -> Double           -- ^ Tolerance
 >          -> [ClosedPath Double]
 > union p tol =
->   traceShow out $ 
 >   outputPaths out
 >   where
 >     out = view output $
