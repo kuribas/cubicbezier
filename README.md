@@ -1,14 +1,16 @@
 cubicbezier
 ===========
 
-Haskell library for manipulating cubic bezier curves.  The original goal
-is to support typography, but it may be useful for general graphics.
+Haskell library for manipulating cubic and quadratic bezier curves.
+It is meant as a low level library to support 2D graphics and
+typography applications.
 
 Features implemented:
 
- * least squares approximation of a curve through some points
- * finding tangents parallel to a vector
  * evaluating bezier curves and derivatives
+ * approximation of a curve through some points
+ * removing overlap and boolean operations on paths
+ * finding tangents parallel to a vector
  * curvature and radius of curvature
  * intersections between two curves
  * intersections between a curve and a line
@@ -18,8 +20,4 @@ Features implemented:
  
 Features todo:
 
- * self intersections
- * creating an approximate outline for a curve
- * adding and subtracting closed paths
- * removing overlap from paths
-
+ * calligraphic strokes
