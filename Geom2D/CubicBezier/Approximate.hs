@@ -1,6 +1,6 @@
 {-# LANGUAGE BangPatterns, MultiWayIf #-}
 module Geom2D.CubicBezier.Approximate
---       (approximatePath, approximateQuadPath, approximatePathMax, approximateCubic)
+       (approximatePath, approximateQuadPath, approximatePathMax, approximateCubic)
        where
 import Geom2D
 import Geom2D.CubicBezier.Basic

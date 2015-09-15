@@ -927,7 +927,8 @@ Higher level functions
 > fillFunction NonZero = (>0)
 > fillFunction EvenOdd = odd
 
-> -- | Union of paths, removing overlap and rounding to the given
+> -- | `O((n+m)*log(n+m))`, for `n` segments and `m` intersections.
+> -- Union of paths, removing overlap and rounding to the given
 > -- tolerance.
 > union :: [ClosedPath Double] -- ^ Paths
 >          -> FillRule         -- ^ input fillrule
@@ -942,7 +943,8 @@ Higher level functions
 >     xStr = makeXStruct (over _1 $ subtract 1) (over _1 (+1)) tol $
 >            concatMap closedPathCurves p
 >
-> -- | combine paths using the given boolean operation    
+> -- | `O((n+m)*log(n+m))`, for `n` segments and `m` intersections.
+> -- Combine paths using the given boolean operation
 > boolPathOp :: (Bool -> Bool -> Bool) -- ^ operation
 >           -> [ClosedPath Double]     -- ^ first path (merged with union)
 >           -> [ClosedPath Double]     -- ^ second path (merged with union)
