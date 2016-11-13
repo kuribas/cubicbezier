@@ -61,7 +61,8 @@ import Geom2D
 import Geom2D.CubicBezier.Basic
 import Data.List
 import Text.Printf
-import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as V
+import Geom2D.CubicBezier.Numeric
 
 data OpenMetaPath a = OpenMetaPath [(Point a, MetaJoin a)] (Point a)
                       -- ^ A metapath with endpoints
@@ -209,7 +210,7 @@ unmetaCyclic nodes =
       tensionsA = map (tensionL . snd) nodes
       tensionsB = map (tensionR . snd) nodes
       turnAngles = zipWith turnAngle chords (tail $ cycle chords)
-      thetas = solveCyclicTriD $
+      thetas = solveCyclicTriD2 $
                eqsCycle tensionsA
                points
                tensionsB
@@ -234,7 +235,7 @@ unmetaSubSegment (OpenMetaPath nodes lastpoint) =
       tensionsA = map tensionL joins
       tensionsB = map tensionR joins
       turnAngles = zipWith turnAngle chords (tail chords) ++ [0]
-      thetas = solveTriDiagonal $
+      thetas = solveTriDiagonal2 $
                eqsOpen points joins chords turnAngles
                (map tensionValue tensionsA)
                (map tensionValue tensionsB)
@@ -335,40 +336,18 @@ breakPoint _ = True
 -- where u[n] = 0
 -- then solving for t[n]
 -- see metafont the program: ¶ 283
-solveTriDiagonal :: [(Double, Double, Double, Double)] -> [Double]
-solveTriDiagonal [] = error "solveTriDiagonal: not enough equations"
-solveTriDiagonal ((_, b0, c0, d0): rows) =
-  V.toList $ solveTriDiagonal2 (b0, c0, d0) (V.fromList rows)
-
-solveTriDiagonal2 :: (Double, Double, Double) -> V.Vector (Double, Double, Double, Double) -> V.Vector Double
-solveTriDiagonal2 (!b0, !c0, !d0) rows = solutions
-  where
-    twovars = V.scanl nextrow (c0/b0, d0/b0) rows
-    solutions = V.scanr nextsol vn (V.unsafeInit twovars)
-    vn = snd $ V.unsafeLast twovars
-    nextsol (u, v) ti = v - u*ti
-    nextrow (u, v) (ai, bi, ci, di) =
-      (ci/(bi - u*ai), (di - v*ai)/(bi - u*ai))
+solveTriDiagonal2 :: [(Double, Double, Double, Double)] -> [Double]
+solveTriDiagonal2 [] = error "solveTriDiagonal: not enough equations"
+solveTriDiagonal2 ((_, b0, c0, d0): rows) =
+  V.toList $ solveTriDiagonal (b0, c0, d0) (V.fromList rows)
 
 -- test = ((80.0,58.0,51.0),[(-432.0,78.0,102.0,503.0),(71.0,-82.0,20.0,2130.0),(52.39,-10.43,4.0,56.0),(34.0,38.0,0.0,257.0)])
 -- [-15.726940528143576,22.571642107784243,-78.93751365259996,-297.27313545829384,272.74438435742667]
       
 -- solve the cyclic tridiagonal system.
 -- see metafont the program: ¶ 286
-solveCyclicTriD :: [(Double, Double, Double, Double)] -> [Double]
-solveCyclicTriD rows = solutions
-  where
-    (!un, !vn, !wn): threevars =
-      reverse $ tail $ scanl nextrow (0, 0, 1) rows
-    nextrow (!u, !v, !w) (!ai, !bi, !ci, !di) =
-      (ci/(bi - ai*u), (di - ai*v)/(bi - ai*u), -ai*w/(bi - ai*u))
-    (totvn, totwn) = foldl (\(v', w') (u, v, w) ->
-                             (v - u*v', w - u*w'))
-                     (0, 1) threevars
-    t0 = (vn - un*totvn) / (1 - (wn - un*totwn))
-    solutions = scanl nextsol t0
-                ((un, vn, wn) : reverse (tail threevars))
-    nextsol t (!u, !v, !w) = (v + w*t0 - t)/u
+solveCyclicTriD2 :: [(Double, Double, Double, Double)] -> [Double]
+solveCyclicTriD2 = V.toList . solveCyclicTriD . V.fromList
 
 turnAngle :: DPoint -> DPoint -> Double
 turnAngle (Point 0 0) _ = 0
@@ -411,7 +390,7 @@ eqsOpen _ [MetaJoin mt1 t1 t2 mt2] [delta] _ _ _ =
        (0, 1, 0, turnAngle delta dir2)]
     (Curl _, Curl _) ->
       [(0, 1, 0, 0), (0, 1, 0, 0)]
-    _ -> undefined
+    _ -> error "illegal end of open path"
 
 eqsOpen points joins chords turnAngles tensionsA tensionsB =
   eq0 : restEquations joins tensionsA dists turnAngles tensionsB

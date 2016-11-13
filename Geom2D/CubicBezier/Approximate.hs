@@ -75,35 +75,13 @@ quadDist f qb tmin tmax t =
       nd = ((p ^-^ b) ^.^ b') / (b'^.^b')
   in vectorDistance p $ evalBezier qb (t + nd)
 
-phi :: (Floating a) => a
-phi = (-1 + sqrt 5) / 2
-
-goldSearch :: (Ord a, Floating a) => (a -> a) -> a
-goldSearch f =
-  goldSearch' f 0 x1 x2 1 (f 0)
-  (f x1) (f x2) (f 1) 4
-    where x1 = 1 - phi
-          x2 = phi
-
-goldSearch' :: (Ord a, Floating a) =>
-               (a -> a) -> a -> a -> a ->
-               a -> a -> a -> a -> a -> Int -> a
-goldSearch' f x0 x1 x2 x3 y0 y1 y2 y3 maxiter
-  | maxiter < 1 = maximum [y0, y1, y2, y3]
-  | y1 < y2 =
-    let x25 = x1 + phi*(x3-x1)
-        y25 = f x25
-    in goldSearch' f x1 x2 x25 x3 y1 y2 y25 y3 (maxiter-1)
-  | otherwise =
-    let x05 = x2 + phi*(x0-x2)
-        y05 = f x05
-    in goldSearch' f x0 x05 x1 x2 y0 y05 y1 y2 (maxiter-1)
-
 -- find maximum distance using golden section search
 maxDist :: (V.Unbox a, Ord a, Floating a) =>
            (a -> (Point a, Point a)) ->
            QuadBezier a -> a -> a -> a
-maxDist f qb tmin tmax = goldSearch (quadDist f qb tmin tmax)
+maxDist f qb tmin tmax =
+  quadDist f qb tmin tmax $
+  goldSearch (quadDist f qb tmin tmax) 4
 
 approxquad :: (Ord a, Floating a) =>
               Point a -> Point a -> Point a -> Point a -> QuadBezier a

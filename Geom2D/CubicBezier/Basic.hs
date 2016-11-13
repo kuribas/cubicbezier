@@ -6,7 +6,7 @@ module Geom2D.CubicBezier.Basic
         bezierParam, bezierParamTolerance, reorient, bezierToBernstein,
         evalBezierDerivs, evalBezier, evalBezierDeriv, findBezierTangent, quadToCubic,
         bezierHoriz, bezierVert, findBezierInflection, findBezierCusp,
-        arcLength, arcLengthParam, splitBezier, bezierSubsegment, splitBezierN,
+        bezierArc, arcLength, arcLengthParam, splitBezier, bezierSubsegment, splitBezierN,
         colinear)
        where
 import Geom2D
@@ -22,14 +22,14 @@ data CubicBezier a = CubicBezier {
   cubicC1 :: !(Point a),
   cubicC2 :: !(Point a),
   cubicC3 :: !(Point a)}
-                   deriving (Eq, Show, Functor)
+  deriving (Eq, Show, Functor)
 
 -- | A quadratic bezier curve.
 data QuadBezier a = QuadBezier {
   quadC0 :: !(Point a),
   quadC1 :: !(Point a),
   quadC2 :: !(Point a)}
-                  deriving (Eq, Show, Functor)
+  deriving (Eq, Show, Functor)
 
 -- Use a tuple, because it has 0(1) unzip when using unboxed vectors.
 -- | A bezier curve of any degree.
@@ -296,6 +296,18 @@ findBezierInflection (CubicBezier (Point x0 y0) (Point x1 y1) (Point x2 y2) (Poi
 findBezierCusp :: CubicBezier Double -> [Double]
 findBezierCusp b = filter vertical $ bezierHoriz b
   where vertical = (== 0) . pointY . snd . evalBezierDeriv b
+
+-- | @bezierArc startAngle endAngle@ approximates an arc on the unit circle with
+-- a single cubic béziér curve.  Maximum deviation is <0.03% for arcs
+-- 90° degrees or less.
+bezierArc :: Double -> Double -> CubicBezier Double
+bezierArc start end = CubicBezier p0 p1 p2 p3
+  where
+    p0 = dirVector start
+    p3 = dirVector end
+    p1 = p0 ^+^ k *^ (rotate90L $* p0)
+    p2 = p1 ^+^ k *^ (rotate90R $* p3)
+    k = 4/3 * tan((end-start)/4)
 
 -- | @arcLength c t tol finds the arclength of the bezier c at t, within given tolerance tol.
 

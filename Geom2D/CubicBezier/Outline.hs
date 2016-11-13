@@ -1,7 +1,7 @@
 -- | Offsetting bezier curves and stroking curves.
 
 module Geom2D.CubicBezier.Outline
-       (bezierOffset)
+       (bezierOffset, bezierOffsetPoint)
        where
 import Geom2D
 import Geom2D.CubicBezier.Basic

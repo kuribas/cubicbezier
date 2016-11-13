@@ -3,21 +3,20 @@
 Removing overlap from bezier paths in haskell
 =============================================
 
-This document describes an algorithm for removing overlap and
-performing set operations on bezier paths, but at the same time it is
-a working module for the haskell `cubicbezier` package.  This way it
-can serve two purposes at once: someone who wants to implement this
-algorithm can use this as an explanation of the algorithm, while at
-the same time it is a working version of the described algorithm.
+This literate programming document serves as both the description 
+and code for the algorithm for removing overlap and
+performing set operations on bezier paths.  It can be used both for
+understanding the code, and for porting the used algorithm to other 
+implementations.
 
-**Note on porting**: Porting this code to another language should
-present no difficulties.  However some care must be taken with regards
-to lazyness.  Often many variables inside the `where` statement aren't
+**Note on porting**: Porting should be fairly straightforward. 
+However some care must be taken with regards to lazyness.  Often
+many variables inside the `where` statement aren't
 evaluated in all guards, so it's important to evaluate only those
-which appear in the guards.  The main state can be modified using
-mutation instead of copying without any troubles.  For modifying the
-state, the `lens` library is used.  The lens functions can be
-interpreted in a mutable language as follows:
+which appear in the guards.  This library uses copying instead of 
+mutation, but for the most part mutation can be used as well.
+It uses the `lens` library for modifying state.  The following translation
+could be made to a mutable language: 
 
   * reading state:
     - `view field struct`: `struct.field`
@@ -54,11 +53,11 @@ Let's begin with declaring the module and library imports:
 > import qualified Data.Map.Strict as M
 > import qualified Data.Set as S
 
-So what does it mean to remove overlap?  Basicly we want to keep
-curves where one side is inside the filled region, and the other side
-is outside, and discard the rest.Since that could be true only of a
-part of the curve, we also need to split each curve when it intersects
-another curve.  How do you know which side is the inside, and which
+The basic idea is to keep curves where one side is inside the filled
+region, and the other side is outside, and discard the rest. 
+Since that could be true only of a part of the curve, we also need to
+split each curve when it intersects
+another curve.  How to know which side is the inside, and which
 side the outside?  There are two methods which are use the most: the
 [*even-odd rule*](https://en.wikipedia.org/wiki/Even%E2%80%93odd_rule)
 and the [*nonzero rule*](https://en.wikipedia.org/wiki/Nonzero-rule).
@@ -69,7 +68,7 @@ turnratio changes with each curve.
 Checking each pair of curves for intersections would work, but is
 rather inefficient.  We only need to check for overlap when two curves
 are adjacent.  Fortunately there exist a good method from
-*computational geometry*, called a *sweep line algorithm*.  The basic
+*computational geometry*, called the *sweep line algorithm*.  The 
 idea is to sweep a vertical line over the input, starting from
 leftmost point to the right (of course the opposite direction is also
 possible), and to update the input dynamically.  We keep track of each
@@ -87,9 +86,9 @@ since the data is ordered by X coordinate.:
 
 > type XStruct = M.Map PointEvent [Curve]
 
-Why `PointEvent`, and not just `Point`?  We need to have a `Ord`
-instance for the map, which much match our horizontal ordering.  A
-newtype is ideal, since it has no extra cost, and allows us to define
+I use `PointEvent` instead of just `Point`.  This way I can have a `Ord`
+instance for the map, which must match the horizontal ordering.  A
+newtype is ideal, since it has no extra cost, and allows me to define
 a Ord instance for defining the relative order.  The value from the
 map is a list, since there can be many curves starting from the same
 point.
@@ -97,7 +96,7 @@ point.
 > newtype PointEvent = PointEvent DPoint
 >                    deriving Show
 
-When the x-coordinates are equal, I use the y-coordinate to determine
+When the x-coordinates are equal, use the y-coordinate to determine
 the order.
 
 > instance Eq PointEvent where
@@ -109,13 +108,13 @@ the order.
 >     compare (x1, y2) (x2, y1)
 
 All curves are kept left to right, so we need to remember the
-direction for the output:
+curve direction for the output:
 
 The curves intersecting the sweepline are kept in another balanced
 Tree, called the *Y-structure*.  *These curves are not allowed to
 overlap*, except in the endpoints, and will be ordered vertically.
-I'll use the `Curve` datatype to define the ordering of the curves,
-and to add additional information.  The `turnRatio` field is the
+The `Curve` datatype defines the ordering of the curves,
+and adds additional information.  The `turnRatio` field is the
 turnRatio of the area to the left for a left to right curve, and to
 the right for a right to left curve.  The `changeTurn` function
 determines how the turnRatio will change from up to down.  This

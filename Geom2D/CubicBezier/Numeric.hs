@@ -1,6 +1,16 @@
--- | Some numerical computations used by the cubic bezier functions
-module Geom2D.CubicBezier.Numeric where
-import Data.Vector.Unboxed as V
+{-# LANGUAGE BangPatterns #-}
+-- | Numerical computations used by the cubic bezier functions.  Also
+-- contains functions that aren't used anymore, but might be useful on
+-- its own.
+module Geom2D.CubicBezier.Numeric
+       (quadraticRoot, solveLinear2x2, 
+        goldSearch, 
+        makeSparse, SparseMatrix, sparseMulT, sparseMul,
+        addMatrix, addVec, lsqMatrix, lsqSolveDist,
+        decompLDL, lsqSolve,
+        solveTriDiagonal, solveCyclicTriD)
+       where
+import qualified Data.Vector.Unboxed as V
 import Data.Vector.Unboxed.Mutable as MV
 import Data.Matrix.Unboxed as M
 import qualified Data.Matrix.Generic as G
@@ -8,7 +18,7 @@ import qualified Data.Matrix.Unboxed.Mutable as MM
 import Control.Monad.ST
 import Control.Monad
 
-
+sign :: (Ord a, Num a, Num t) => a -> t
 sign x | x < 0 = -1
        | otherwise = 1
 
@@ -42,11 +52,39 @@ solveLinear2x2 a b c d e f =
   where det = d * b - a * e
 {-# SPECIALIZE solveLinear2x2 :: Double -> Double -> Double -> Double -> Double -> Double -> Maybe (Double, Double) #-}
 
+phi :: (Floating a) => a
+phi = (-1 + sqrt 5) / 2
+
+
+goldSearch :: (Ord a, Floating a) => (a -> a) -> Int -> a
+goldSearch f maxiter =
+  goldSearch' f 0 x1 x2 1 (f 0) 
+  (f x1) (f x2) (f 1) maxiter
+    where x1 = 1 - phi
+          x2 = phi
+{-# SPECIALIZE goldSearch :: (Double -> Double) -> Int -> Double #-}          
+
+goldSearch' :: (Ord a, Floating a) =>
+               (a -> a) -> a -> a -> a ->
+               a -> a -> a -> a -> a -> Int -> a
+goldSearch' f x0 x1 x2 x3 y0 y1 y2 y3 maxiter
+  | maxiter < 1 = snd $ maximum [(y0, x0), (y1, x1),
+                                 (y2, x2), (y3, x3)]
+  | y1 < y2 =
+    let x25 = x1 + phi*(x3-x1)
+        y25 = f x25
+    in goldSearch' f x1 x2 x25 x3 y1 y2 y25 y3 (maxiter-1)
+  | otherwise =
+    let x05 = x2 + phi*(x0-x2)
+        y05 = f x05
+    in goldSearch' f x0 x05 x1 x2 y0 y05 y1 y2 (maxiter-1)
+
+
 data SparseMatrix a =
   SparseMatrix (V.Vector Int)
   (V.Vector (Int, Int)) (M.Matrix a)
                       
-makeSparse :: Unbox a => Vector Int
+makeSparse :: Unbox a => V.Vector Int
               -- ^ The column index of the first element of each row.
               -- Should be ascending in order.
               -> M.Matrix a
@@ -77,6 +115,7 @@ sparseRanges v vars width = ranges
       | e >= height = height
       | v `V.unsafeIndex` e > i = e
       | otherwise = nextEnd (e+1) i
+
 
 -- | Given a rectangular matrix M, calculate the symmetric square
 -- matrix MᵀM which can be used to find a least squares solution to
@@ -195,7 +234,7 @@ solveLDL m v
         \i -> do
           let vi = v `V.unsafeIndex` i
           s <- liftM (V.foldl' (-) vi) $
-               V.forM (enumFromN 0 i) $
+               V.forM (V.enumFromN 0 i) $
                \j -> liftM ((m `M.unsafeIndex` (j, i-j)) *)
                      (MV.unsafeRead sol1 j)
           MV.unsafeWrite sol1 i s
@@ -205,7 +244,7 @@ solveLDL m v
         \i -> do
           let vi = v `V.unsafeIndex` i
           s <- liftM (V.foldl' (-) vi) $
-               V.forM (enumFromN 1 (width-1)) $
+               V.forM (V.enumFromN 1 (width-1)) $
                \j -> liftM ((m `M.unsafeIndex` (i-j, j)) *)
                      (MV.unsafeRead sol1 $ i-j)
           MV.unsafeWrite sol1 i s
@@ -216,7 +255,7 @@ solveLDL m v
           solI <- MV.unsafeRead sol1 (vars-i-1)
           let d = m `M.unsafeIndex` (vars-i-1, 0)
           s <- liftM (V.foldl' (-) (solI/d)) $
-               V.forM (enumFromN 0 i) $
+               V.forM (V.enumFromN 0 i) $
                \j -> liftM ((m `M.unsafeIndex` (vars-i-1, j+1)) *)
                      (MV.unsafeRead sol1 $ vars-i+j)
           MV.unsafeWrite sol1 (vars-i-1) s
@@ -227,7 +266,7 @@ solveLDL m v
           solI <- MV.unsafeRead sol1 (vars-i-1)
           let d = m `M.unsafeIndex` (vars-i-1, 0)
           s <- liftM (V.foldl' (-) (solI/d)) $
-               V.forM (enumFromN 0 (width-1)) $
+               V.forM (V.enumFromN 0 (width-1)) $
                \j -> liftM ((m `M.unsafeIndex` (vars-i-1, j+1)) *)
                      (MV.unsafeRead sol1 $ vars-i+j)
           MV.unsafeWrite sol1 (vars-i-1) s
@@ -265,3 +304,33 @@ lsqSolveDist (SparseMatrix r s m') v
     m1 = SparseMatrix r s m1'
     m2 = SparseMatrix r s m2'
 {-# SPECIALIZE lsqSolveDist :: SparseMatrix (Double, Double) -> V.Vector (Double, Double) -> V.Vector Double #-}
+
+-- | solve a tridiagonal system.  see metafont the program: ¶ 283
+solveTriDiagonal :: (Unbox a, Fractional a) =>
+                    (a, a, a) -> V.Vector (a, a, a, a) -> V.Vector a
+solveTriDiagonal (!b0, !c0, !d0) rows = solutions
+  where
+    twovars = V.scanl nextrow (c0/b0, d0/b0) rows
+    solutions = V.scanr nextsol vn (V.unsafeInit twovars)
+    vn = snd $ V.unsafeLast twovars
+    nextsol (u, v) ti = v - u*ti
+    nextrow (u, v) (ai, bi, ci, di) =
+      (ci/(bi - u*ai), (di - v*ai)/(bi - u*ai))
+{-# SPECIALIZE solveTriDiagonal :: (Double, Double, Double) -> V.Vector (Double, Double, Double, Double) -> V.Vector Double #-}
+
+-- | solve a cyclic tridiagonal system.  see metafont the program: ¶ 286
+solveCyclicTriD :: (Unbox a, Fractional a) => V.Vector (a, a, a, a) -> V.Vector a
+solveCyclicTriD rows = solutions
+  where
+    threevars = V.tail $ V.scanl nextrow (0, 0, 1) rows
+    nextrow (!u, !v, !w) (!ai, !bi, !ci, !di) =
+      (ci/(bi - ai*u), (di - ai*v)/(bi - ai*u), -ai*w/(bi - ai*u))
+    (totvn, totwn) = V.foldr (\(u, v, w) (v', w') ->
+                               (v - u*v', w - u*w'))
+                     (0, 1) (V.init threevars)
+    t0 = (vn - un*totvn) / (1 - (wn - un*totwn))
+    (!un, !vn, !wn) = V.last threevars
+    solutions = V.scanl nextsol t0 $ V.cons (un, vn, wn) $
+                V.init $ V.init $ threevars
+    nextsol t (!u, !v, !w) = (v + w*t0 - t)/u
+{-# SPECIALIZE solveCyclicTriD :: V.Vector (Double, Double, Double, Double) -> V.Vector Double #-}
