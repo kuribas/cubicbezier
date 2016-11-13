@@ -146,6 +146,20 @@ closestPoint (Line p1 p2) p3 = Point px py
     py = (dy*u - dx*v) / m
 {-# specialize closestPoint :: Line Double -> Point Double -> Point Double #-}  
 
+-- | Calculate the intersection of two lines.  If the determinant is
+-- less than tolerance (parallel or coincident lines), return Nothing.
+lineIntersect :: (Ord a, Floating a) => Line a -> Line a -> a -> Maybe (Point a)
+lineIntersect (Line p1 p2) (Line p3 p4) eps
+  | abs det <= eps = Nothing
+  | otherwise = Just $ (a*^d2 ^-^ b*^d1) ^/ det
+  where
+    d1 = p1 ^-^ p2
+    d2 = p3 ^-^ p4
+    det = vectorCross d1 d2
+    a = vectorCross p1 p2 
+    b = vectorCross p3 p4
+{-# SPECIALIZE lineIntersect :: Line Double -> Line Double -> Double -> Maybe DPoint #-}    
+
 -- | The lenght of the vector.
 vectorMag :: Floating a => Point a -> a
 vectorMag (Point x y) = sqrt(x*x + y*y)
@@ -251,3 +265,8 @@ rotate90R = rotateVec (Point 0 (-1))
 translate :: Num a => Point a -> Transform a
 translate (Point x y) = Transform 1 0 x 0 1 y
 {-# INLINE translate #-}
+
+-- | The identity transformation.
+idTrans :: Num a => Transform a
+idTrans = Transform 1 0 0 0 1 0
+{-# INLINE idTrans #-}
