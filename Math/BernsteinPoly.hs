@@ -11,6 +11,7 @@ module Math.BernsteinPoly
         bernsteinEvalDeriv, binCoeff, convolve, bernsteinEvalDerivs, bernsteinDeriv)
        where
 import Data.Vector.Unboxed as V
+import Data.Vector.Unboxed.Mutable as M
 import qualified Data.Vector as B
 
 data BernsteinPoly a = BernsteinPoly {
@@ -60,17 +61,23 @@ bernsteinSubsegment b t1 t2
 
 -- | Calculate the convolution of two vectors.
 convolve :: (Unbox a, Num a) => Vector a -> Vector a -> Vector a
-convolve a b =
-  V.map (\i -> V.sum $
-               V.zipWith (*) a $
-               V.reverse $
-               V.unsafeTake i b)
-  (V.enumFromN 1 $ V.length b)
-  V.++ V.map (\i -> V.sum $
-                    V.zipWith (*)
-                    (V.unsafeDrop i a)
-                    (V.reverse b))
-  (V.enumFromN 1 $ V.length a-1)
+convolve x h = V.create $ do
+  let xN = V.length x
+  let hN = V.length h
+  let xIndices = V.enumFromN 0 xN
+  let hIndices = V.enumFromN 0 hN
+
+  xM <- V.unsafeThaw x
+  hM <- V.unsafeThaw h
+  yM <- M.replicate (xN + hN - 1) 0
+
+  V.forM_ xIndices $ \i -> do
+    a <- M.unsafeRead xM i
+    V.forM_ hIndices $ \j -> do
+      b <- M.unsafeRead hM j
+      M.unsafeModify yM (+ a * b) (i + j)
+
+  return yM
 {-# SPECIALIZE convolve :: Vector Double -> Vector Double -> Vector Double #-}
 
 -- | Multiply two bernstein polynomials using convolution.  The final
@@ -114,7 +121,6 @@ degreeElevate (toScaled -> b) times =
 
 -- | Evaluate the bernstein polynomial using the horner rule adapted
 -- for bernstein polynomials.
-
 bernsteinEval :: (Unbox a, Fractional a)
                  => BernsteinPoly a -> a -> a
 bernsteinEval (BernsteinPoly v) _
