@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE BangPatterns, DeriveFunctor #-}
 -- | This module implements an extension to paths as used in
 -- D.E.Knuth's /Metafont/.  Metafont gives an alternate way
@@ -65,20 +67,21 @@ import qualified Data.Vector.Unboxed as V
 import Geom2D.CubicBezier.Numeric
 
 data OpenMetaPath a = OpenMetaPath [(Point a, MetaJoin a)] (Point a)
+  deriving (Functor, Traversable, Foldable)
                       -- ^ A metapath with endpoints
 data ClosedMetaPath a = ClosedMetaPath [(Point a, MetaJoin a)]
                         -- ^ A metapath with cycles.  The last join
                         -- joins the last point with the first.
-                      deriving (Eq, Functor)
+                      deriving (Eq, Functor, Traversable, Foldable)
 
 data MetaJoin a = MetaJoin { metaTypeL :: MetaNodeType a
                            -- ^ The nodetype going out of the
                            -- previous point.  The metafont default is
                            -- @Open@.
-                           , tensionL :: Tension
+                           , tensionL :: Tension a
                              -- ^ The tension going out of the previous point.
                              -- The metafont default is 1.
-                           , tensionR :: Tension
+                           , tensionR :: Tension a
                              -- ^ The tension going into the next point.
                              -- The metafont default is 1.
                            , metaTypeR :: MetaNodeType a
@@ -87,7 +90,7 @@ data MetaJoin a = MetaJoin { metaTypeL :: MetaNodeType a
                            }
                 | Controls (Point a) (Point a)
                   -- ^ Specify the control points explicitly.
-                deriving (Show, Eq, Functor)
+                deriving (Show, Eq, Functor, Traversable, Foldable)
                          
 data MetaNodeType a = Open
                     -- ^ An open node has no direction specified.  If
@@ -95,7 +98,7 @@ data MetaNodeType a = Open
                     -- same direction going into and going out from
                     -- the node.  If it is an endpoint or corner
                     -- point, it will have curl of 1.
-                  | Curl {curlgamma :: Double}
+                  | Curl {curlgamma :: a}
                     -- ^ The node becomes and endpoint or a corner
                     -- point.  The curl specifies how much the segment
                     -- `curves`.  A curl of `gamma` means that the
@@ -103,28 +106,28 @@ data MetaNodeType a = Open
                     -- following node.
                   | Direction {nodedir :: Point a}
                     -- ^ The node has a given direction.
-                  deriving (Eq, Show, Functor)
+                  deriving (Eq, Show, Functor, Foldable, Traversable)
 
-data Tension = Tension {tensionValue :: Double}
+data Tension a = Tension {tensionValue :: a}
                -- ^ The tension value specifies how /tense/ the curve is.
                -- A higher value means the curve approaches a line
                -- segment, while a lower value means the curve is more
                -- round.  Metafont doesn't allow values below 3/4.
-             | TensionAtLeast {tensionValue :: Double}
+             | TensionAtLeast {tensionValue :: a}
                -- ^ Like @Tension@, but keep the segment inside the
                -- bounding triangle defined by the control points, if
                -- there is one.
-             deriving (Eq, Show)
+             deriving (Eq, Show, Functor, Foldable, Traversable)
 
-instance Show a => Show (ClosedMetaPath a) where
+instance (Show a, Real a) => Show (ClosedMetaPath a) where
   show (ClosedMetaPath nodes) =
     showPath nodes ++ "cycle"
 
-instance Show a => Show (OpenMetaPath a) where
+instance (Show a, Real a) => Show (OpenMetaPath a) where
   show (OpenMetaPath nodes lastpoint) =
     showPath nodes ++ showPoint lastpoint
 
-showPath :: Show a => [(Point a, MetaJoin a)] -> String
+showPath :: (Show a, Real a) => [(Point a, MetaJoin a)] -> String
 showPath = concatMap showNodes
   where
     showNodes (p, Controls u v) =
@@ -137,10 +140,10 @@ showPath = concatMap showNodes
           | t1 == t2 = printf "tension %s.." (showTension t1)
           | otherwise = printf "tension %s and %s.."
                         (showTension t1) (showTension t2)
-    showTension (TensionAtLeast t) = printf "atleast %.3f" t :: String
-    showTension (Tension t) = printf "%.3f" t :: String
+    showTension (TensionAtLeast t) = printf "atleast %.3f" (realToFrac t :: Double) :: String
+    showTension (Tension t) = printf "%.3f" (realToFrac t :: Double) :: String
     typename Open = ""
-    typename (Curl g) = printf "{curl %.3f}" g :: String
+    typename (Curl g) = printf "{curl %.3f}" (realToFrac g :: Double) :: String
     typename (Direction dir) = printf "{%s}" (showPoint dir) :: String
     
 showPoint :: Show a => Point a -> String
@@ -158,8 +161,6 @@ unmetaOpen' nodes endpoint =
   let subsegs = openSubSegments nodes endpoint
       path = joinSegments $ map unmetaSubSegment subsegs
   in OpenPath path endpoint
-
-
 
 unmetaClosed :: ClosedMetaPath Double -> ClosedPath Double
 unmetaClosed (ClosedMetaPath nodes) =
@@ -359,7 +360,7 @@ zipNext [] = []
 zipNext l = zip l (tail $ cycle l)
 
 -- find the equations for a cycle containing only open points
-eqsCycle :: [Tension] -> [DPoint] -> [Tension]
+eqsCycle :: [Tension Double] -> [DPoint] -> [Tension Double]
          -> [Double] -> [(Double, Double, Double, Double)]
 eqsCycle tensionsA points tensionsB turnAngles = 
   zipWith4 eqTension
@@ -428,7 +429,8 @@ eqTension (tensionA', tensionA) (dist', dist) (psi', psi) (tensionB', tensionB) 
     d = tensionA * tensionA / (tensionB * dist)
 
 -- the equation for a starting curl
-eqCurl0 :: Double -> Double -> Double -> Double -> (Double, Double, Double, Double)
+eqCurl0 :: Double -> Double -> Double -> Double
+        -> (Double, Double, Double, Double)
 eqCurl0 gamma tensionA tensionB psi = (0, c, d, r)
   where
     c = chi/tensionA + 3 - 1/tensionB
@@ -437,7 +439,8 @@ eqCurl0 gamma tensionA tensionB psi = (0, c, d, r)
     r = -d*psi
 
 -- the equation for an ending curl
-eqCurlN :: Double -> Double -> Double -> (Double, Double, Double, Double)
+eqCurlN :: Double -> Double -> Double
+        -> (Double, Double, Double, Double)
 eqCurlN gamma tensionA tensionB = (a, b, 0, 0)
   where
     a = (3 - 1/tensionB)*chi + 1/tensionA
@@ -445,7 +448,8 @@ eqCurlN gamma tensionA tensionB = (a, b, 0, 0)
     chi = gamma*tensionA*tensionA / (tensionB*tensionB)
 
 -- getting the control points
-unmetaJoin :: DPoint -> DPoint -> Double -> Double -> Tension -> Tension -> PathJoin Double
+unmetaJoin :: DPoint -> DPoint -> Double -> Double -> Tension Double
+           -> Tension Double -> PathJoin Double
 unmetaJoin !z0 !z1 !theta !phi !alpha !beta
   | abs phi < 1e-4 && abs theta < 1e-4 = JoinLine
   | otherwise = JoinCurve u v
@@ -479,7 +483,7 @@ sqrt2 = sqrt 2
 
 -- another magic formula by John Hobby.
 velocity :: Double -> Double -> Double
-         -> Double -> Tension -> Double
+         -> Double -> Tension Double -> Double
 velocity st sf ct cf t =
   min 4 $ 
   (2 + sqrt2 * (st - sf/16)*(sf - st/16)*(ct - cf)) /

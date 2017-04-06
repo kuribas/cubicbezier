@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns, MultiWayIf #-}
 module Geom2D.CubicBezier.Approximate
-       (approximatePath, approximateQuadPath, approximatePathMax, approximateCubic)
+       (approximatePath, approximateQuadPath, approximatePathMax, approximateQuadPathMax,
+        approximateCubic)
        where
 import Geom2D
 import Geom2D.CubicBezier.Basic
@@ -60,28 +61,38 @@ approximateQuadPath f tol tmin tmax fast
   | otherwise = approximateQuad' f tol tmin tmax fast
   where
     curve = approx1quad f tmin tmax
-    err = maxDist f curve tmin tmax
+    err = maxDist f curve tmin tmax (if fast then 0 else 5)
 {-# SPECIALIZE approximateQuadPath :: (Double -> (DPoint, DPoint)) -> Double ->
     Double -> Double -> Bool -> [QuadBezier Double] #-}
       
 -- find the distance between the function at t and the quadratic bezier.
 -- calculate the value and derivative at t, and improve the closeness of t.
-quadDist :: (V.Unbox a, Floating a) =>
-            (a -> (Point a, Point a)) -> QuadBezier a -> a -> a -> a -> a
-quadDist f qb tmin tmax t =
-  let p = fst (f $ interpolate tmin tmax t)
-      (b, b') = evalBezierDeriv qb t
-      -- distance from p to the normal at b(t) / velocity
-      nd = ((p ^-^ b) ^.^ b') / (b'^.^b')
-  in vectorDistance p $ evalBezier qb (t + nd)
+quadDist :: (V.Unbox a, Ord a, Floating a) =>
+            (a -> (Point a, Point a)) -> QuadBezier a -> a
+         -> a -> Int -> a -> a
+quadDist f qb tmin tmax maxiter t =
+  quadDist' f qb tmin tmax t (fst (f $ interpolate tmin tmax t)) maxiter (evalBezierDeriv qb t)
 
+quadDist' :: (V.Unbox a, Ord a, Floating a) =>
+             (a -> (Point a, Point a))
+          -> QuadBezier a -> a -> a -> a -> Point a -> Int -> (Point a, Point a) -> a
+quadDist' f qb tmin tmax t p maxiter (b, b')
+  | maxiter <= 1 || abs (err2-err1) <= err1 * (1/8) = err2
+  | otherwise = quadDist' f qb tmin tmax (t+ndist) p (maxiter-1) (b2, b2')
+  where dp = p ^-^ b
+        err1 = vectorMag dp
+        -- distance from p to the normal at b(t) / velocity at t
+        ndist = (dp ^.^ b') / (b' ^.^ b')
+        (b2, b2') = evalBezierDeriv qb (t+ndist)
+        err2 = vectorDistance p b2
+        
 -- find maximum distance using golden section search
 maxDist :: (V.Unbox a, Ord a, Floating a) =>
            (a -> (Point a, Point a)) ->
-           QuadBezier a -> a -> a -> a
-maxDist f qb tmin tmax =
-  quadDist f qb tmin tmax $
-  goldSearch (quadDist f qb tmin tmax) 4
+           QuadBezier a -> a -> a -> Int -> a
+maxDist f qb tmin tmax maxiter =
+  quadDist f qb tmin tmax maxiter $
+  goldSearch (quadDist f qb tmin tmax maxiter) 4
 
 approxquad :: (Ord a, Floating a) =>
               Point a -> Point a -> Point a -> Point a -> QuadBezier a
@@ -104,18 +115,24 @@ approx1quad f tmin tmax =
 splitQuad :: (Show a, V.Unbox a, Ord a, Floating a) =>
                 a -> a -> (a -> (Point a, Point a))
                 -> a -> a -> Int -> (a, a, QuadBezier a, a, QuadBezier a)
-splitQuad node offset f tmin tmax maxiter
+splitQuad node offset f tmin tmax maxiter =
+  splitQuad' node offset f tmin tmax maxiter maxiter
+  
+splitQuad' :: (Show a, V.Unbox a, Ord a, Floating a) =>
+                a -> a -> (a -> (Point a, Point a))
+                -> a -> a -> Int -> Int -> (a, a, QuadBezier a, a, QuadBezier a)
+splitQuad' node offset f tmin tmax maxiter maxiter2
   | maxiter < 1 || (err0 < 2*err1 && err0 > err1/2) =
       (tmid, err0, curve0, err1, curve1)
   | otherwise =
-    splitQuad (if err0 < err1 then node+offset else node-offset)
-    (offset/2) f tmin tmax (maxiter-1)
+    splitQuad' (if err0 < err1 then node+offset else node-offset)
+    (offset/2) f tmin tmax (maxiter-1) maxiter2
   where
     tmid = interpolate tmin tmax node
     curve0 = approx1quad f tmin tmid 
-    err0 = maxDist f curve0 tmin tmid
+    err0 = maxDist f curve0 tmin tmid maxiter2
     curve1 = approx1quad f tmid tmax 
-    err1 = maxDist f curve1 tmid tmax
+    err1 = maxDist f curve1 tmid tmax maxiter2
 
 approximateQuad' :: (Show a, V.Unbox a, Ord a, Floating a) =>
                     (a -> (Point a, Point a)) -> 
@@ -130,7 +147,7 @@ approximateQuad' f tol tmin tmax fast =
    else approximateQuad' f tol tmid tmax fast)
   where
     (tmid, err0, curve0, err1, curve1) =
-      splitQuad 0.5 0.25 f tmin tmax (if fast then 0 else 5)
+     splitQuad 0.5 0.25 f tmin tmax (if fast then 0 else 5)
 
 approximatePath' :: (V.Unbox a, Ord a, Floating a) =>
                     (a -> (Point a, Point a)) -> Int ->
@@ -145,7 +162,7 @@ approximatePath' f n tol tmin tmax fast =
    else approximatePath' f n tol tmid tmax fast)
   where
     (tmid, err0, curve0, err1, curve1) =
-      splitCubic 0.5 0.25 n f tmin tmax (if fast then 0 else 5)
+      splitCubic n 0.5 0.25 f tmin tmax (if fast then 0 else 5)
 --{-# SPECIALIZE approximatePath' :: (Double -> (Point Double, Point Double)) -> Int -> Double -> Double -> Double -> [CubicBezier Double]  #-}      
 
 -- | Like approximatePath, but limit the number of subcurves.
@@ -162,16 +179,17 @@ approximatePathMax :: (V.Unbox a, Floating a, Ord a) =>
                    -> a                          -- ^ The upper parameter of the function
                    -> Bool
                    -- ^ Calculate the result faster, but with more
-                   -- subcurves.  Runs typically 10 times faster, but
-                   -- generates 50% more subcurves.  Useful for interactive use.
+                   -- subcurves.  Runs faster (typically 10 times),
+                   -- but generates more subcurves (about 50%).
+                   -- Useful for interactive use.
                    -> [CubicBezier a]
-approximatePathMax m f n tol tmin tmax fast =
-  approxMax f tol m ts fast segments
+approximatePathMax m f samples tol tmin tmax fast =
+  approxMax f tol m fast (splitCubic samples) segments
   where segments = M.singleton err (FunctionSegment tmin tmax outline)
         (p0, p0') = f tmin
         (p1, p1') = f tmax
-        ts = V.map (\i -> fromIntegral i/(fromIntegral n+1) `asTypeOf` tmin) $
-             V.enumFromN (1::Int) n
+        ts = V.map (\i -> fromIntegral i/(fromIntegral samples+1) `asTypeOf` tmin) $
+             V.enumFromN (1::Int) samples
         points = V.map (fst . f . interpolate tmin tmax) ts
         curveCb = CubicBezier p0 (p0^+^p0') (p1^-^p1') p1
         (outline, err) =
@@ -179,24 +197,47 @@ approximatePathMax m f n tol tmin tmax fast =
 {-# SPECIALIZE approximatePathMax ::
     Int -> (Double -> (Point Double, Point Double)) -> Int                      
     -> Double -> Double -> Double -> Bool -> [CubicBezier Double] #-}
-data FunctionSegment a = FunctionSegment {
+data FunctionSegment b a = FunctionSegment {
   fsTmin :: !a,  -- the least t param of the segment in the original curve
   _fsTmax :: !a,  -- the max t param of the segment in the original curve
-  fsCurve :: CubicBezier a -- the curve segment
+  fsCurve :: b -- the curve segment
   }
 
+-- | Like approximateQuadPath, but limit the number of subcurves.
+approximateQuadPathMax :: (V.Unbox a, Show a, Floating a, Ord a) =>
+                      Int                        -- ^ The maximum number of subcurves
+                   -> (a -> (Point a, Point a))    -- ^ The function to approximate and it's derivative
+                   -> a                          -- ^ The tolerance
+                   -> a                          -- ^ The lower parameter of the function      
+                   -> a                          -- ^ The upper parameter of the function
+                   -> Bool
+                   -- ^ Calculate the result faster, but with more
+                   -- subcurves.  Runs faster, but generates more
+                   -- subcurves.  Useful for interactive use.
+                   -> [QuadBezier a]
+approximateQuadPathMax m f tol tmin tmax fast =
+  approxMax f tol m fast splitQuad segments
+  where segments = M.singleton err (FunctionSegment tmin tmax curveQd)
+        (p0, p0') = f tmin
+        (p1, p1') = f tmax
+        curveQd = approxquad p0 p0' p1' p1
+        err = maxDist f curveQd tmin tmax (if fast then 0 else 5)
+{-# SPECIALIZE approximateQuadPathMax ::
+    Int -> (Double -> (Point Double, Point Double))
+    -> Double -> Double -> Double -> Bool -> [QuadBezier Double] #-}
 -- Keep a map from maxError to FunctionSegment for each subsegment to keep
 -- track of the segment with the maximum error.  This ensures a n
 -- log(n) execution time, rather than n^2 when a list is used.
 approxMax :: (V.Unbox a, Ord a, Floating a) =>
-             (a -> (Point a, Point a)) -> a -> Int
-          -> V.Vector a -> Bool -> M.Map a (FunctionSegment a) ->
-          [CubicBezier a]
-approxMax f tol n ts fast segments
-  | (n <= 1) || (err < tol) =
+             (a -> (Point a, Point a)) -> a -> Int -> Bool
+          -> (a -> a -> (a -> (Point a, Point a)) -> a -> a -> Int -> (a, a, b, a, b))
+          -> M.Map a (FunctionSegment b a)
+          -> [b]
+approxMax f tol maxCurves fast splitBez segments
+  | (maxCurves <= 1) || (err < tol) =
     map fsCurve $ sortBy (compare `on` fsTmin) $
     map snd $ M.toList segments
-  | otherwise = approxMax f tol (n-1) ts fast $
+  | otherwise = approxMax f tol (maxCurves-1) fast splitBez $
                 M.insert err_l (FunctionSegment t_min t_mid curve_l) $
                 M.insert err_r (FunctionSegment t_mid t_max curve_r)
                 newSegments
@@ -204,25 +245,21 @@ approxMax f tol n ts fast segments
     ((err, FunctionSegment t_min t_max _), newSegments) =
       M.deleteFindMax segments
     (t_mid, err_l, curve_l, err_r, curve_r) =
-      splitCubic 0.5 0.25 n f t_min t_max (if fast then 0 else 5)
-{-# SPECIALIZE approxMax :: (Double -> (Point Double, Point Double)) -> Double -> Int
-          -> V.Vector Double -> Bool -> M.Map Double (FunctionSegment Double) -> [CubicBezier Double] #-}
+      splitBez 0.5 0.25 f t_min t_max (if fast then 0 else 5)
       
 splitCubic :: (V.Unbox a, Ord a, Floating a) =>
-                a -> a -> Int -> (a -> (Point a, Point a))
+                Int -> a -> a -> (a -> (Point a, Point a))
                 -> a -> a -> Int -> (a, a, CubicBezier a, a, CubicBezier a)
-splitCubic node offset n f tmin tmax maxiter
+splitCubic n node offset f tmin tmax maxiter
   | maxiter < 1 || (err0 < 2*err1 && err0 > err1/2) =
       (tmid, err0, curve0, err1, curve1)
   | otherwise = 
-      splitCubic (if err0 < err1 then node+offset else node-offset)
-      (offset/2) n f tmin tmax (maxiter-1)
+      splitCubic n (if err0 < err1 then node+offset else node-offset)
+      (offset/2) f tmin tmax (maxiter-1)
   where
     tmid = interpolate tmin tmax node
     (curve0, err0) = approx1cubic n f tmin tmid maxiter
     (curve1, err1) = approx1cubic n f tmid tmax maxiter
-{-# SPECIALIZE splitCubic :: Double -> Double -> Int -> (Double -> (Point Double, Point Double))
-                -> Double -> Double -> Int -> (Double, Double, CubicBezier Double, Double, CubicBezier Double) #-}
     
 approx1cubic :: (V.Unbox a, Ord a, Floating a) =>
            Int -> (a -> (Point a, Point a)) -> a -> a ->

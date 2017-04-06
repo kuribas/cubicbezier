@@ -1,18 +1,26 @@
-{-# LANGUAGE BangPatterns, FlexibleInstances, MultiParamTypeClasses, DeriveFunctor, ViewPatterns #-}
+{-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE BangPatterns, FlexibleInstances, MultiParamTypeClasses, DeriveTraversable, ViewPatterns, PatternSynonyms, MultiWayIf #-}
 module Geom2D.CubicBezier.Basic
        (CubicBezier (..), QuadBezier (..), AnyBezier (..), GenericBezier(..),
         PathJoin (..), ClosedPath(..), OpenPath (..), AffineTransform (..), anyToCubic, anyToQuad,
         openPathCurves, closedPathCurves, curvesToOpen, curvesToClosed,
+        consOpenPath, consClosedPath, openClosedPath, closeOpenPath, 
         bezierParam, bezierParamTolerance, reorient, bezierToBernstein,
         evalBezierDerivs, evalBezier, evalBezierDeriv, findBezierTangent, quadToCubic,
         bezierHoriz, bezierVert, findBezierInflection, findBezierCusp,
-        bezierArc, arcLength, arcLengthParam, splitBezier, bezierSubsegment, splitBezierN,
-        colinear)
+        bezierArc, arcLength, arcLengthParam, splitBezier, bezierSubsegment,
+        splitBezierN, colinear, closest, findX)
        where
 import Geom2D
 import Geom2D.CubicBezier.Numeric
 import Math.BernsteinPoly
 import Numeric.Integration.TanhSinh
+import Data.Monoid ()
+import Data.List (minimumBy)
+import Data.Function (on)
+import Data.VectorSpace
+import Debug.Trace
+
 import qualified Data.Vector.Unboxed as V
 import qualified Data.Vector.Unboxed.Mutable as MV
 
@@ -22,14 +30,14 @@ data CubicBezier a = CubicBezier {
   cubicC1 :: !(Point a),
   cubicC2 :: !(Point a),
   cubicC3 :: !(Point a)}
-  deriving (Eq, Show, Functor)
+  deriving (Eq, Show, Functor, Foldable, Traversable)
 
 -- | A quadratic bezier curve.
 data QuadBezier a = QuadBezier {
   quadC0 :: !(Point a),
   quadC1 :: !(Point a),
   quadC2 :: !(Point a)}
-  deriving (Eq, Show, Functor)
+  deriving (Eq, Show, Functor, Foldable, Traversable)
 
 -- Use a tuple, because it has 0(1) unzip when using unboxed vectors.
 -- | A bezier curve of any degree.
@@ -79,26 +87,61 @@ instance GenericBezier AnyBezier where
 
 data PathJoin a = JoinLine |
                   JoinCurve (Point a) (Point a)
-              deriving (Show, Functor)
+              deriving (Show, Functor, Foldable, Traversable)
 data OpenPath a = OpenPath [(Point a, PathJoin a)] (Point a) 
-                  deriving (Show, Functor)
+                  deriving (Show, Functor, Foldable, Traversable)
 data ClosedPath a = ClosedPath [(Point a, PathJoin a)]
-                  deriving (Show, Functor)
+                  deriving (Show, Functor, Foldable, Traversable)
+
+instance Monoid (OpenPath a) where
+  mempty = OpenPath [] (error "empty path")
+  mappend p1 (OpenPath [] _) = p1
+  mappend (OpenPath [] _) p2 = p2
+  mappend (OpenPath joins1 _) (OpenPath joins2 p) =
+    OpenPath (joins1 ++ joins2) p
+
+instance (Num a) => AffineTransform (PathJoin a) a where
+  transform _ JoinLine = JoinLine
+  transform t (JoinCurve p q) = JoinCurve (transform t p) (transform t q)
+
+instance (Num a) => AffineTransform (OpenPath a) a where
+  transform t (OpenPath s p) = OpenPath (map (transformSeg t) s) (transform t p)
+
+transformSeg :: (Num a) => Transform a -> (Point a, PathJoin a) -> (Point a, PathJoin a)
+transformSeg t (p, jn) = (transform t p, transform t jn)
+
+instance (Num a) => AffineTransform (ClosedPath a) a where
+  transform t (ClosedPath s) = ClosedPath (map (transformSeg t) s)
 
 instance (Num a) => AffineTransform (CubicBezier a) a where
   {-# SPECIALIZE transform :: Transform Double -> CubicBezier Double -> CubicBezier Double #-}
   transform t (CubicBezier c0 c1 c2 c3) =
     CubicBezier (transform t c0) (transform t c1) (transform t c2) (transform t c3)
 
+instance (Num a) => AffineTransform (QuadBezier a) a where
+  {-# SPECIALIZE transform :: Transform Double -> QuadBezier Double -> QuadBezier Double #-}
+  transform t (QuadBezier c0 c1 c2) =
+    QuadBezier (transform t c0) (transform t c1) (transform t c2)
+
+-- | construct an open path
+consOpenPath :: Point a -> PathJoin a -> OpenPath a -> OpenPath a
+consOpenPath p join (OpenPath joins q) =
+  OpenPath ((p, join):joins) q
+
+-- | construct a closed path
+consClosedPath :: Point a -> PathJoin a -> ClosedPath a -> ClosedPath a
+consClosedPath p join (ClosedPath joins) =
+  ClosedPath ((p, join):joins)
+
 -- | Return the open path as a list of curves.
 openPathCurves :: Fractional a => OpenPath a -> [CubicBezier a]
 openPathCurves (OpenPath curves p) = go curves p
   where
     go [] _ = []
-    go [(p0, jn)] p = [makeCB p0 jn p]
-    go ((p0, jn):rest@((p1,_):_)) p =
-      makeCB p0 jn p1 : go rest p
-    makeCB p0 (JoinLine) p1 =
+    go [(p0, jn)] q = [makeCB p0 jn q]
+    go ((p0, jn):rest@((p1,_):_)) q =
+      makeCB p0 jn p1 : go rest q
+    makeCB p0 JoinLine p1 =
       CubicBezier p0 (interpolateVector p0 p1 (1/3))
       (interpolateVector p0 p1 (2/3)) p1
     makeCB p0 (JoinCurve p1 p2) p3 =
@@ -128,6 +171,16 @@ curvesToClosed cs = ClosedPath cs2
   where
     OpenPath cs2 _ = curvesToOpen cs
 
+-- | close an open path, discarding the last point
+closeOpenPath :: OpenPath a -> ClosedPath a
+closeOpenPath (OpenPath j p) = ClosedPath j
+
+-- | open a closed path
+openClosedPath :: ClosedPath a -> OpenPath a
+openClosedPath (ClosedPath []) = OpenPath [] (error "empty path")
+openClosedPath (ClosedPath j@((p,_):_)) = OpenPath j p
+
+
 
 -- | safely convert from `AnyBezier' to `CubicBezier`
 anyToCubic :: (V.Unbox a) => AnyBezier a -> Maybe (CubicBezier a)
@@ -141,9 +194,10 @@ anyToQuad b@(AnyBezier v)
   | degree b == 2 = Just $ unsafeFromVector v
   | otherwise = Nothing
 
-evalBezierDerivsCubic :: Fractional a =>
+evalBezierDerivsCubic :: Num a =>
                          CubicBezier a -> a -> [Point a]
 evalBezierDerivsCubic (CubicBezier a b c d) t =
+  p `seq` p' `seq` p'' `seq` p''' `seq`
   [p, p', p'', p''', Point 0 0]
   where
     u = 1-t
@@ -152,22 +206,46 @@ evalBezierDerivsCubic (CubicBezier a b c d) t =
     da = 3*^(b^-^a)
     db = 3*^(c^-^b)
     dc = 3*^(d^-^c)
-    p = u*^(u*^(u*^a ^+^ 3*t*^b) ^+^ 3*t2*^c) ^+^ t3*^d
-    p' = u*^(u*^da ^+^ 2*t*^db) ^+^ t2*^dc
-    p'' = 2*u*^(db^-^da) ^+^ 2*t*^(dc^-^db)
+    p = u*^(u*^(u*^a ^+^ (3*t)*^b) ^+^ (3*t2)*^c) ^+^ t3*^d
+    p' = u*^(u*^da ^+^ (2*t)*^db) ^+^ t2*^dc
+    p'' = (2*u)*^(db^-^da) ^+^ (2*t)*^(dc^-^db)
     p''' = 2*^(dc^-^2*^db^+^da)
 {-# SPECIALIZE evalBezierDerivsCubic :: CubicBezier Double -> Double -> [DPoint] #-}    
 
-evalBezierDerivsQuad :: Fractional a =>
+evalBezierDerivCubic :: Num a =>
+                         CubicBezier a -> a -> (Point a, Point a)
+evalBezierDerivCubic (CubicBezier a b c d) t = p `seq` p' `seq` (p, p')
+  where
+    u = 1-t
+    t2 = t*t
+    t3 = t2*t
+    da = 3*^(b^-^a)
+    db = 3*^(c^-^b)
+    dc = 3*^(d^-^c)
+    p = u*^(u*^(u*^a ^+^ (3*t)*^b) ^+^ (3*t2)*^c) ^+^ t3*^d
+    p' = u*^(u*^da ^+^ (2*t)*^db) ^+^ t2*^dc
+{-# SPECIALIZE evalBezierDerivCubic :: CubicBezier Double -> Double -> (DPoint, DPoint) #-}    
+
+evalBezierDerivsQuad :: Num a =>
                         QuadBezier a -> a -> [Point a]
 evalBezierDerivsQuad (QuadBezier a b c) t = [p, p', p'', Point 0 0]
   where
     u = 1-t
     t2 = t*t
-    p = u*^(u*^a ^+^ 2*t*^b) ^+^ t2*^c
+    p = u*^(u*^a ^+^ (2*t)*^b) ^+^ t2*^c
     p' = 2*^(u*^(b^-^a) ^+^ t*^(c^-^b))
     p'' = 2*^(c^-^ 2*^b ^+^ a)
 {-# SPECIALIZE evalBezierDerivsQuad :: QuadBezier Double -> Double -> [DPoint] #-}        
+
+evalBezierDerivQuad :: Num a =>
+                        QuadBezier a -> a -> (Point a, Point a)
+evalBezierDerivQuad (QuadBezier a b c) t = p `seq` p' `seq` (p, p')
+  where
+    u = 1-t
+    t2 = t*t
+    p = u*^(u*^a ^+^ (2*t)*^b) ^+^ t2*^c
+    p' = 2*^(u*^(b^-^a) ^+^ t*^(c^-^b))
+{-# SPECIALIZE evalBezierDerivQuad :: QuadBezier Double -> Double -> (DPoint, DPoint) #-}        
 
 -- | Evaluate the bezier and all its derivatives using the modified horner algorithm.
 evalBezierDerivs :: (GenericBezier b, V.Unbox a, Fractional a) =>
@@ -193,6 +271,22 @@ bezierParamTolerance (toVector -> v) eps = eps / maxVel
   where 
     maxVel = 3 * V.maximum (V.zipWith vectorDistance (V.map (uncurry Point) v)
                             (V.map (uncurry Point) $ V.tail v))
+{-# NOINLINE [2] bezierParamTolerance #-}             
+
+bezierParamToleranceCubic :: (Ord a, Floating a) => CubicBezier a -> a -> a
+bezierParamToleranceCubic (CubicBezier p0 p1 p2 p3) eps = eps / maxVel
+  where maxVel = (3 *) $ max (vectorDistance p0 p1) $
+                 max (vectorDistance p1 p2)
+                 (vectorDistance p2 p3)
+{-# SPECIALIZE bezierParamToleranceCubic :: CubicBezier Double -> Double -> Double #-}
+{-# RULES "bezierParamTolerance/cubic" bezierParamTolerance = bezierParamToleranceCubic #-}
+
+bezierParamToleranceQuad :: (Ord a, Floating a) => QuadBezier a -> a -> a
+bezierParamToleranceQuad (QuadBezier p0 p1 p2) eps = eps / maxVel
+  where maxVel = (3 *) $ max (vectorDistance p0 p1) (vectorDistance p1 p2)
+
+{-# SPECIALIZE bezierParamToleranceQuad :: QuadBezier Double -> Double -> Double #-}
+{-# RULES "bezierParamTolerance/quad" bezierParamTolerance = bezierParamToleranceQuad #-}
 
 -- | Reorient to the curve B(1-t).
 reorient :: (GenericBezier b, V.Unbox a) => b a -> b a
@@ -224,7 +318,7 @@ evalBezier bc t = head $ evalBezierDerivs bc t
 evalBezierCubic :: Fractional a =>
                    CubicBezier a -> a -> Point a
 evalBezierCubic (CubicBezier a b c d) t =
-  u*^(u*^(u*^a ^+^ 3*t*^b) ^+^ 3*t2*^c) ^+^ t3*^d
+  u*^(u*^(u*^a ^+^ (3*t)*^b) ^+^ (3*t2)*^c) ^+^ t3*^d
   where
     u = 1-t
     t2 = t*t
@@ -234,7 +328,7 @@ evalBezierCubic (CubicBezier a b c d) t =
 evalBezierQuad :: Fractional a =>
                   QuadBezier a -> a -> Point a
 evalBezierQuad (QuadBezier a b c) t = 
-  u*^(u*^a ^+^ 2*t*^b) ^+^ t2*^c
+  u*^(u*^a ^+^ (2*t)*^b) ^+^ t2*^c
   where
     u = 1-t
     t2 = t*t
@@ -249,6 +343,9 @@ evalBezierDeriv :: (V.Unbox a, Fractional a) =>
 evalBezierDeriv bc t = (b,b')
   where
     (b:b':_) = evalBezierDerivs bc t
+{-# NOINLINE evalBezierDeriv #-}    
+{-# RULES "evalBezierDeriv/cubic" evalBezierDeriv = evalBezierDerivCubic #-}
+{-# RULES "evalBezierDeriv/quad" evalBezierDeriv = evalBezierDerivQuad #-}
 
 -- | @findBezierTangent p b@ finds the parameters where
 -- the tangent of the bezier curve @b@ has the same direction as vector p.
@@ -364,7 +461,7 @@ arcLengthP !b !len !tot !t !dt !eps
 quadToCubic :: (Fractional a) =>
                QuadBezier a -> CubicBezier a
 quadToCubic (QuadBezier a b c) =
-  CubicBezier a (1/3*^(a ^+^ 2*^b)) (1/3*^(2*^b ^+^ c)) c
+  CubicBezier a ((1/3)*^(a ^+^ 2*^b)) ((1/3)*^(2*^b ^+^ c)) c
 
 -- | Split a bezier curve into two curves.
 splitBezier :: (V.Unbox a, Fractional a) =>
@@ -388,7 +485,7 @@ splitBezierCubic (CubicBezier a b c d) t =
       abbc = interpolateVector ab bc t
       bccd = interpolateVector bc cd t
       mid = interpolateVector abbc bccd t
-  in (CubicBezier a ab abbc mid, CubicBezier mid bccd cd d)
+  in mid `seq` (CubicBezier a ab abbc mid, CubicBezier mid bccd cd d)
 {-# SPECIALIZE splitBezierCubic :: CubicBezier Double -> Double -> (CubicBezier Double, CubicBezier Double) #-}     
 
 -- | Split a bezier curve into two curves.
@@ -402,7 +499,6 @@ splitBezierQuad (QuadBezier a b c) t =
 {-# RULES "splitBezier/cubic" splitBezier = splitBezierCubic #-}
 {-# RULES "splitBezier/quad"  splitBezier = splitBezierQuad #-}
 
-
 -- | Return the subsegment between the two parameters.
 bezierSubsegment :: (Ord a, V.Unbox a, Fractional a) => GenericBezier b =>
                     b a -> a -> a -> b a
@@ -411,8 +507,19 @@ bezierSubsegment b t1 t2
   | t2 == 0   = fst $ splitBezier b t1
   | otherwise = snd $ flip splitBezier (t1/t2) $
                 fst $ splitBezier b t2
-{-# SPECIALIZE bezierSubsegment :: CubicBezier Double -> Double -> Double -> CubicBezier Double #-}
 {-# SPECIALIZE bezierSubsegment :: QuadBezier Double -> Double -> Double -> QuadBezier Double #-}
+{-# NOINLINE[2] bezierSubsegment #-}
+
+-- | Return the subsegment between the two parameters.
+bezierSubsegmentCubic :: (V.Unbox a, Fractional a) => CubicBezier a -> a -> a -> CubicBezier a
+bezierSubsegmentCubic b t1 t2 =
+  CubicBezier b1 (b1 ^+^ b1' ^* ((t2-t1)/3))
+  (b2 ^-^ (b2' ^* ((t2-t1)/3))) b2
+  where (b1, b1') = evalBezierDeriv b t1
+        (b2, b2') = evalBezierDeriv b t2
+{-# SPECIALIZE bezierSubsegmentCubic :: CubicBezier Double -> Double -> Double -> CubicBezier Double #-}
+{-# RULES "bezierSubsegment/cubic" bezierSubsegment = bezierSubsegmentCubic #-}
+
 
 -- | Split a bezier curve into a list of beziers
 -- The parameters should be in ascending order or
@@ -429,6 +536,107 @@ splitBezierN c (t:u:rest) =
 {-# SPECIALIZE splitBezierN :: CubicBezier Double -> [Double] -> [CubicBezier Double] #-}
 {-# SPECIALIZE splitBezierN :: QuadBezier Double -> [Double] -> [QuadBezier Double] #-}
 
+evalBezierDerivs2Cubic :: CubicBezier Double -> Double -> (DPoint, DPoint, DPoint)
+evalBezierDerivs2Cubic (CubicBezier a b c d) t =
+  p `seq` p' `seq` p'' `seq`(p, p', p'')
+  where
+    u = 1-t
+    t2 = t*t
+    t3 = t2*t
+    da = 3*^(b^-^a)
+    db = 3*^(c^-^b)
+    dc = 3*^(d^-^c)
+    p = u*^(u*^(u*^a ^+^ (3*t)*^b) ^+^ (3*t2)*^c) ^+^ t3*^d
+    p' = u*^(u*^da ^+^ (2*t)*^db) ^+^ t2*^dc
+    p'' = (2*u)*^(db^-^da) ^+^ (2*t)*^(dc^-^db)
+
+-- estimate the next approximation for the point closest to p by
+-- dividing the approximate arclength on the osculating circle at t by the
+-- speed at t.
+closestBezierCurve :: CubicBezier Double -> DPoint -> Double -> Double
+closestBezierCurve cb p t
+ | vectorMagSquare (p ^-^ b) < v*v*r_v*r_v*10 =
+   closestLinePt b b' p
+ | otherwise =
+   -- circular arc divided by velocity
+   (fastVectorAngle (rotateScaleVec (flipVector (p ^-^ c)) $* (Point (-by') bx'))) * r_v
+  where
+    closestLinePt :: DPoint -> DPoint -> DPoint -> Double
+    closestLinePt (Point bx by) (Point bx' by') (Point px py) =
+      ((px - bx)*bx' + (py - by)*by')/v
+    (b, b'@(Point bx' by'), Point bx'' by'') = evalBezierDerivs2Cubic cb t
+    -- radius of curvature / velocity
+    r_v = v/denom
+    v = bx'*bx' + by'*by'
+    denom = bx''*by' - bx'*by''
+    -- center of osculating circle
+    c = b ^+^ ((rotate90R $* b') ^* r_v)
+
+-- approximation of vectorAngle, fastVectorAngle θ ≊ vectorAngle θ for
+-- small |θ|. This avoids a costly atan2 instruction, and I measured a
+-- performance increase upto 33%.
+fastVectorAngle :: DPoint -> Double
+fastVectorAngle (Point x y)
+  | abs y < abs x = y/x + if x < 0 then signum y*pi else 0
+  | otherwise = signum y*pi/2-(x/y)
+    
+-- | Find the closest value on the bezier to the given point, within tolerance.  Return the first value found.
+closest :: CubicBezier Double -> DPoint -> Double -> Double
+closest cb p eps =
+  iter (closestBezierCurve cb p) eps 0 1 0.5
+
+-- iterate, fallback to bisection if the approximation doesn't converge.  
+iter :: (Double -> Double) -> Double -> Double -> Double -> Double -> Double  
+iter f eps mint maxt curt
+  | abs dt <= eps = curt + dt
+  | dt < 0 =
+      if | curt + dt <= mint ->
+           if mint == 0 && f 0 <= 0
+           then 0
+           -- bisect
+           else
+             let dT = (curt - mint)/2
+             in if dT < eps then mint+dT
+             else iter f eps mint curt (mint+dT)
+         | otherwise ->
+             iter f eps mint curt (curt+dt)
+  | otherwise =
+      if | curt + dt >= maxt ->
+           if maxt == 1 && f 1 >= 0
+           then 1
+           --bisect
+           else
+             let dT = (maxt - curt)/2
+             in if dT < eps then curt +dT
+             else iter f eps curt maxt (curt+dT)
+         | otherwise ->
+             iter f eps curt maxt (curt+dt)
+  where
+    dt = f curt
+
+-- | Find the x value of the cubic bezier.  The bezier must be
+-- monotonically increasing in the X coordinate.
+findX :: CubicBezier Double -> Double -> Double -> Double
+findX (CubicBezier (Point p0 _) (Point p1 _) (Point p2 _) (Point p3 _)) x =
+  find0 (p0-x) (p1-x) (p2-x) (p3-x)
+
+find0 :: Double -> Double -> Double -> Double -> Double -> Double
+find0 a b c d eps =
+  iter bezierZero eps 0 1 0.5
+  where
+    bezierZero t
+      | bx == 0 = t
+      | otherwise = -bx/bx'
+      where 
+        u = 1-t
+        t2 = t*t
+        t3 = t2*t
+        da = 3*^(b-a)
+        db = 3*^(c-b)
+        dc = 3*^(d-c)
+        bx = u*(u*(u*a + (3*t)*b) + (3*t2)*c) + t3*d
+        bx' = u*(u*da + (2*t)*db) + t2*dc
+        
 -- | Return False if some points fall outside a line with a thickness of the given tolerance.
 
 -- fat line calculation taken from the bezier-clipping algorithm (Sederberg)

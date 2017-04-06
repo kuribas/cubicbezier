@@ -3,7 +3,7 @@
 -- contains functions that aren't used anymore, but might be useful on
 -- its own.
 module Geom2D.CubicBezier.Numeric
-       (quadraticRoot, solveLinear2x2, 
+       (quadraticRoot, cubicRoot, cubicRootNorm, solveLinear2x2, 
         goldSearch, 
         makeSparse, SparseMatrix, sparseMulT, sparseMul,
         addMatrix, addVec, lsqMatrix, lsqSolveDist,
@@ -38,6 +38,29 @@ quadraticRoot a b c
     result | d < 0     = []
            | d == 0    = [x1]
            | otherwise = [x1, x2]
+
+cubicRoot :: Double -> Double -> Double -> Double -> [Double]
+cubicRoot a b c d
+  | a == 0 = quadraticRoot b c d
+  | otherwise = cubicRootNorm (b/a) (c/a) (d/a)
+
+-- | Find real roots from the normalized cubic equation.
+cubicRootNorm :: Double -> Double -> Double -> [Double]
+cubicRootNorm a b c
+  | r2 < q3 = [m2sqrtQ * cos(t/3) - a/3,
+               m2sqrtQ * cos((t+2*pi)/3) - a/3,
+               m2sqrtQ * cos((t - 2*pi)/3) - a/3]
+  | otherwise = [d+e-a/3]
+  where q = (a*a - 3*b) / 9
+        q3 = q*q*q
+        r = (2*a*a*a - 9*a*b + 27*c) / 54
+        t = acos(r/sqrt q3)
+        m2sqrtQ = -2*sqrt q
+        r2 = r*r
+        d = - sign(r)*((abs r + sqrt(r2-q3))**1/3)
+        e | d == 0 = 0
+          | otherwise = q/d
+        
 
 -- | @solveLinear2x2 a b c d e f@ solves the linear equation with two variables (x and y) and two systems:
 -- 

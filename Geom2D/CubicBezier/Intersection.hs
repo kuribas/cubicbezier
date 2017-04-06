@@ -1,14 +1,14 @@
 {-# LANGUAGE BangPatterns, MultiWayIf #-}
 -- | Intersection routines using Bezier Clipping.  Provides also functions for finding the roots of onedimensional bezier curves.  This can be used as a general polynomial root solver by converting from the power basis to the bernstein basis.
 module Geom2D.CubicBezier.Intersection
-       (bezierIntersection, bezierLineIntersections, bezierFindRoot, closest)
+       (bezierIntersection, bezierLineIntersections, bezierFindRoot)
        where
 import Geom2D
 import Geom2D.CubicBezier.Basic
 import Math.BernsteinPoly
 import Data.Maybe
+import Geom2D.CubicBezier.Numeric
 import qualified Data.Vector.Unboxed as V
-import Debug.Trace
 
 -- find the convex hull by comparing the angles of the vectors with
 -- the cross product and backtracking if necessary.
@@ -92,65 +92,65 @@ bezierClip :: CubicBezier Double -> CubicBezier Double -> Double -> Double
            -> Double -> Double -> Double -> Double -> Bool
            -> [(Double, Double)]
 bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
-  tmin tmax umin umax prevClip eps revCurves
-  -- no intersection
-  | isNothing chop_interval = []
+  tmin tmax umin umax prevClip eps revCurves = either id id $ do
+  q3' <- if | vectorDistance q0 q3 > max (vectorMag q0) (vectorMag q3) / (2**30) -> Right q3
+            | vectorDistance q0 q1 > max (vectorMag q0) (vectorMag q1) / (2**30) -> Right q1
+            | vectorDistance q0 q2 > max (vectorMag q0) (vectorMag q2) / (2**30) -> Right q2
+            | otherwise -> Left $
+              let t = closest p q0 eps
+                  newT = tmin * (1-t) + tmax * t
+                  umid = umin + (umax-umin)/2
+              in if revCurves then [(umid, newT)] else [(newT, umid)]
+  let d = lineDistance (Line q0 q3')
+      d1 = d q1
+      d2 = d q2
+      (dmin, dmax) | d1*d2 > 0 = (3/4 * min 0 (min d1 d2),
+                                  3/4 * max 0 (max d1 d2))
+                   | otherwise = (4/9 * min 0 (min d1 d2),
+                                  4/9 * max 0 (max d1 d2))
+  (chop_tmin, chop_tmax) <- maybe (Left []) Right $
+                            chopHull dmin dmax $
+                            map d [p0, p1, p2, p3]
+  let newP = bezierSubsegment p chop_tmin chop_tmax
+      newClip = chop_tmax - chop_tmin
+      new_tmin = tmax * chop_tmin + tmin * (1 - chop_tmin)
+      new_tmax = tmax * chop_tmax + tmin * (1 - chop_tmax)
+  if | -- within tolerance      
+       max (umax - umin) (new_tmax - new_tmin) < eps ->
+       if revCurves
+       then Right [ (umin + (umax-umin)/2,
+                     new_tmin + (new_tmax-new_tmin)/2) ]
+       else Right [ (new_tmin + (new_tmax-new_tmin)/2,
+               umin + (umax-umin)/2)]
+           -- not enough reduction, so split the curve in case we have
+           -- multiple intersections
+     | prevClip > 0.8 && newClip > 0.8 ->
+             if | abs (dmax - dmin) < eps * vectorDistance p0 p3 ->
+                -- fat line is smaller than tolerance.
+                  if revCurves
+                  then Right [(umin, new_tmin), (umax, new_tmax)]
+                  else Right [(new_tmin, umin), (new_tmax, umax)]
+                | new_tmax - new_tmin > umax - umin ->
+                    -- split the longest segment
+                  let (pl, pr) = splitBezier newP 0.5
+                      half_t = new_tmin + (new_tmax - new_tmin) / 2
+                  in Right $ bezierClip q pl umin umax new_tmin half_t
+                     newClip eps (not revCurves) ++
+                     bezierClip q pr umin umax half_t new_tmax
+                     newClip eps (not revCurves)
+                | otherwise ->
+                    let (ql, qr) = splitBezier q 0.5
+                        half_t = umin + (umax - umin) / 2
+                    in Right $ bezierClip ql newP umin half_t
+                       new_tmin new_tmax newClip eps (not revCurves) ++
+                       bezierClip qr newP half_t umax new_tmin new_tmax
+                       newClip eps (not revCurves)
+      -- iterate with the curves swapped.
+     | otherwise ->
+        Right $ bezierClip q newP umin umax new_tmin
+        new_tmax newClip eps (not revCurves)
 
-  -- within tolerance      
-  | max (umax - umin) (new_tmax - new_tmin) < eps =
-    if revCurves
-    then [ (umin + (umax-umin)/2,
-            new_tmin + (new_tmax-new_tmin)/2) ]
-    else [ (new_tmin + (new_tmax-new_tmin)/2,
-            umin + (umax-umin)/2) ]
-
-  -- not enough reduction, so split the curve in case we have
-  -- multiple intersections
-  | prevClip > 0.8 && newClip > 0.8 =
-    if | abs (dmax - dmin) < eps * vectorDistance p0 p3 ->
-         -- fat line is smaller than tolerance.
-         if revCurves
-         then [(umin, tmin), (umax, tmax)]
-         else [(tmin, umin), (umin, tmin)]
-       | new_tmax - new_tmin > umax - umin ->
-         -- split the longest segment
-         let (pl, pr) = splitBezier newP 0.5
-             half_t = new_tmin + (new_tmax - new_tmin) / 2
-         in bezierClip q pl umin umax new_tmin half_t
-            newClip eps (not revCurves) ++
-            bezierClip q pr umin umax half_t new_tmax
-            newClip eps (not revCurves)
-       | otherwise ->
-         let (ql, qr) = splitBezier q 0.5
-             half_t = umin + (umax - umin) / 2
-         in bezierClip ql newP umin half_t
-            new_tmin new_tmax newClip eps (not revCurves) ++
-            bezierClip qr newP half_t umax new_tmin new_tmax
-            newClip eps (not revCurves)
-  -- iterate with the curves reversed.
-  | otherwise =
-      bezierClip q newP umin umax new_tmin
-      new_tmax newClip eps (not revCurves)
-
-  where
-    q3' | q0 == q3 =
-            q0 ^+^ (rotate90L $* p3 ^-^ p0)
-        | otherwise = q3
-    d = lineDistance (Line q0 q3')
-    d1 = d q1
-    d2 = d q2
-    (dmin, dmax) | d1*d2 > 0 = (3/4 * minimum [0, d1, d2],
-                                3/4 * maximum [0, d1, d2])
-                 | otherwise = (4/9 * minimum [0, d1, d2],
-                                4/9 * maximum [0, d1, d2])
-    chop_interval = chopHull dmin dmax $
-                    map d [p0, p1, p2, p3]
-    Just (chop_tmin, chop_tmax) = chop_interval
-    newP = bezierSubsegment p chop_tmin chop_tmax
-    newClip = chop_tmax - chop_tmin
-    new_tmin = tmax * chop_tmin + tmin * (1 - chop_tmin)
-    new_tmax = tmax * chop_tmax + tmin * (1 - chop_tmax)
-
+maxEps :: Double
 maxEps = 1e-8
 
 -- | Find the intersections between two Bezier curves, using the
@@ -210,25 +210,10 @@ bezierFindRoot p tmin tmax eps
 -- X-axis.  Then we only need to test the Y-values for a zero.
 bezierLineIntersections :: CubicBezier Double -> Line Double -> Double -> [Double]
 bezierLineIntersections b (Line p q) eps =
-  bezierFindRoot (listToBernstein $ map pointY [p0, p1, p2, p3]) 0 1 $
-  bezierParamTolerance b eps
-  where (CubicBezier p0 p1 p2 p3) = 
+  filter (\x -> x > 0 && x < 1) $
+  cubicRoot (p3 - 3*p2 + 3*p1 - p0) (3*p2 - 6*p1 + 3*p0) (3*p1 - 3*p0) p0
+  where (CubicBezier (Point p0 _) (Point p1 _) (Point p2 _) (Point p3 _)) = 
           fromJust (inverse $ translate p $* rotateVec (q ^-^ p)) $* b
-
--- | Find the closest value(s) on the bezier to the given point, within tolerance.
-closest :: CubicBezier Double -> DPoint -> Double -> [Double]
-closest cb p@(Point px py) eps =
-  map fst $ filter (\(_, d) -> abs (d - closestDist) < eps/2) $
-  zip tVals dists
-  where
-    closestDist = minimum dists
-    dists = map (vectorDistance p . evalBezier cb) tVals
-    tVals = 0:1:bezierFindRoot poly 0 1 eps
-    (bx, by) = bezierToBernstein cb
-    bx' = bernsteinDeriv bx
-    by' = bernsteinDeriv by
-    poly = (bx ~- listToBernstein [px, px, px, px]) ~* bx' ~+
-           (by ~- listToBernstein [py, py, py, py]) ~* by'
 
 -- let cb = (CubicBezier (Point 0 0) (Point 3 4) (Point 10 4) (Point 31 2)); cb1 = fst (splitBezier cb 0.83242); cb2 = CubicBezier {bezierC0 = Point 4.542593123258268 2.7028033902052537, bezierC1 = Point 9.036628467934 3.788306467438, bezierC2 = Point 16.832161 3.4493180000000002, bezierC3 = Point 31.0 2.0}
 -- bezierIntersection (CubicBezier (Point 0 0) (Point 3 4) (Point 10 4) (Point 31 2)) (CubicBezier (Point 0 0) (Point 6 8) (Point 2 42) (Point 4 15)) 1e-10

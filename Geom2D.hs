@@ -1,21 +1,24 @@
-{-# LANGUAGE TypeFamilies, MultiParamTypeClasses, FlexibleInstances, DeriveFunctor, FunctionalDependencies #-}
+{-# LANGUAGE TypeFamilies, MultiParamTypeClasses, FlexibleInstances, DeriveTraversable, FunctionalDependencies #-}
 
 -- | Basic 2 dimensional geometry functions.
-module Geom2D where
+module Geom2D (
+  module Data.VectorSpace,
+  module Data.Cross,
+  module Geom2D ) where
 import qualified Data.Vector.Generic.Mutable as M
 import qualified Data.Vector.Generic as G
 import qualified Data.Vector.Unboxed as V
+import Data.VectorSpace
+import Data.Cross
 import Control.Monad
+import Numeric.FastMath
 
-
-infixl 6 ^+^, ^-^
-infixl 7 *^, ^*, ^/
 infixr 5 $*
 
 data Point a = Point {
   pointX :: !a,
-  pointY :: !a}
-             deriving (Eq, Functor)
+  pointY :: !a
+  } deriving (Eq, Ord, Functor, Foldable, Traversable)
 
 type DPoint = Point Double
 
@@ -31,19 +34,20 @@ data Transform a = Transform {
   xformD :: !a,
   xformE :: !a,
   xformF :: !a }
-                 deriving (Eq, Show, Functor)
+  deriving (Eq, Show, Functor, Foldable, Traversable)
 
 data Line a = Line (Point a) (Point a)
-            deriving (Show, Eq, Functor)
+            deriving (Show, Eq, Functor, Foldable, Traversable)
+
 data Polygon a = Polygon [Point a]
-               deriving (Show, Eq, Functor)
+               deriving (Show, Eq, Functor, Foldable, Traversable)
 
 class AffineTransform a b | a -> b where
   transform :: Transform b -> a -> a
-
+  
 instance Num a => AffineTransform (Transform a) a where
   {-# INLINE transform #-}
-  transform (Transform a' b' c' d' e' f') (Transform a b c d e f)  =
+  transform (Transform a' b' c' d' e' f') (Transform a b c d e f) =
     Transform (a*a'+b'*d) (a'*b + b'*e) (a'*c+b'*f +c')
     (d'*a+e'*d) (d'*b+e'*e) (d'*c+e'*f+f')
     
@@ -72,6 +76,7 @@ instance V.Unbox a => M.MVector V.MVector (Point a) where
   {-# INLINE basicSet #-}
   {-# INLINE basicUnsafeCopy #-}
   {-# INLINE basicUnsafeGrow #-}
+  basicInitialize (MV_Point v) = M.basicInitialize v
   basicLength (MV_Point v) = M.basicLength v
   basicUnsafeSlice i n (MV_Point v) = MV_Point $ M.basicUnsafeSlice i n v
   basicOverlaps (MV_Point v1) (MV_Point v2) = M.basicOverlaps v1 v2
@@ -108,7 +113,7 @@ t $* p = transform t p
 {-# INLINE ($*) #-}
 
 -- | Calculate the inverse of a transformation.
-inverse :: (Eq a, Num a, Fractional a) => Transform a -> Maybe (Transform a)
+inverse :: (Eq a, Fractional a) => Transform a -> Maybe (Transform a)
 inverse (Transform a b c d e f) = case a*e - b*d of
   0 -> Nothing
   det -> Just $! Transform (a/det) (d/det) (-(a*c + d*f)/det) (b/det) (e/det)
@@ -117,8 +122,9 @@ inverse (Transform a b c d e f) = case a*e - b*d of
 
 -- | Return the parameters (a, b, c) for the normalised equation
 -- of the line: @a*x + b*y + c = 0@.
-lineEquation :: Floating t => Line t -> (t, t, t)
-lineEquation (Line (Point x1 y1) (Point x2 y2)) = (a, b, c)
+lineEquation :: Floating t => Line t -> ( t, t, t )
+lineEquation (Line (Point x1 y1) (Point x2 y2)) =
+  a `seq` b `seq` c `seq` (a, b, c)
   where a = a' / d
         b = b' / d
         c = -(y1*b' + x1*a') / d
@@ -130,9 +136,10 @@ lineEquation (Line (Point x1 y1) (Point x2 y2)) = (a, b, c)
 -- | Return the signed distance from a point to the line.  If the
 -- distance is negative, the point lies to the right of the line
 lineDistance :: Floating a => Line a -> Point a -> a
-lineDistance l = \(Point x y) -> a*x + b*y + c
-  where (a, b, c) = lineEquation l
-{-# SPECIALIZE lineDistance :: Line Double -> DPoint -> Double #-}
+lineDistance l = 
+  case lineEquation l of
+    (a, b, c) -> \(Point x y) -> a*x + b*y + c
+{-# INLINE lineDistance #-}    
 
 -- | Return the point on the line closest to the given point.
 closestPoint :: Fractional a => Line a -> Point a -> Point a
@@ -165,6 +172,12 @@ vectorMag :: Floating a => Point a -> a
 vectorMag (Point x y) = sqrt(x*x + y*y)
 {-# INLINE vectorMag #-}
 
+-- | The lenght of the vector.
+vectorMagSquare :: Floating a => Point a -> a
+vectorMagSquare (Point x y) = x*x + y*y
+{-# INLINE vectorMagSquare #-}
+
+
 -- | The angle of the vector, in the range @(-'pi', 'pi']@.
 vectorAngle :: RealFloat a => Point a -> a
 vectorAngle (Point 0.0 0.0) = 0.0
@@ -182,30 +195,24 @@ normVector p@(Point x y) = Point (x/l) (y/l)
   where l = vectorMag p
 {-# INLINE normVector #-}        
 
--- | Scale vector by constant.
-(*^) :: Num a => a -> Point a -> Point a
-s *^ (Point x y) = Point (s*x) (s*y)
-{-# INLINE (*^) #-}
+instance Num e => AdditiveGroup (Point e) where
+  zeroV = Point 0 0
+  {-# INLINE (^+^) #-}
+  (Point x1 y1) ^+^ (Point x2 y2) = Point (x1+x2) (y1+y2)
+  {-# INLINE negateV #-}
+  negateV (Point a b) = Point (-a) (-b)
+  {-# INLINE (^-^) #-}
+  (Point x1 y1) ^-^ (Point x2 y2) = Point (x1-x2) (y1-y2)
 
--- | Scale vector by reciprocal of constant.
-(^/) :: Fractional a => Point a -> a -> Point a
-(Point x y) ^/ s = Point (x/s) (y/s)
-{-# INLINE (^/) #-}
+instance (Num e) => VectorSpace (Point e) where
+  type Scalar (Point e) = e
+  s *^ (Point x y) = Point (s*x) (s*y)
 
--- | Scale vector by constant, with the arguments swapped.
-(^*) :: Num a => Point a -> a -> Point a
-p ^* s = s *^ p
-{-# INLINE (^*) #-}
+instance (AdditiveGroup e, Num e) => InnerSpace (Point e) where
+  (<.>) = (^.^)
 
--- | Add two vectors.
-(^+^) :: Num a => Point a -> Point a -> Point a
-(Point x1 y1) ^+^ (Point x2 y2) = Point (x1+x2) (y1+y2)
-{-# INLINE (^+^) #-}
-
--- | Subtract two vectors.
-(^-^) :: Num a => Point a -> Point a -> Point a
-(Point x1 y1) ^-^ (Point x2 y2) = Point (x1-x2) (y1-y2)
-{-# INLINE (^-^) #-}
+instance (Floating e) => HasNormal (Point e) where
+  normalVec = normVector
 
 -- | Dot product of two vectors.
 (^.^) :: Num a => Point a -> Point a -> a
@@ -238,6 +245,10 @@ flipVector :: (Num a) => Point a -> Point a
 flipVector (Point x y) = Point x (-y)
 {-# INLINE flipVector #-}
 
+turnAround :: (Num a) => Point a -> Point a
+turnAround = negateV
+{-# INLINE turnAround #-}
+
 -- | Create a transform that rotates by the angle of the given vector
 -- with the x-axis
 rotateVec :: Floating a => Point a -> Transform a
@@ -253,12 +264,12 @@ rotate a = Transform (cos a) (negate $ sin a) 0
 
 -- | Rotate vector 90 degrees left.
 rotate90L :: Floating s => Transform s
-rotate90L = rotateVec (Point 0 1)
+rotate90L = Transform 0 (-1) 0 1 0 0
 {-# INLINE rotate90L #-}
 
 -- | Rotate vector 90 degrees right.
 rotate90R :: Floating s => Transform s
-rotate90R = rotateVec (Point 0 (-1))
+rotate90R = Transform 0 1 0 (-1) 0 0
 {-# INLINE rotate90R #-}
 
 -- | Create a transform that translates by the given vector.
@@ -270,3 +281,4 @@ translate (Point x y) = Transform 1 0 x 0 1 y
 idTrans :: Num a => Transform a
 idTrans = Transform 1 0 0 0 1 0
 {-# INLINE idTrans #-}
+

@@ -1,0 +1,185 @@
+<svg
+    width="${width}"
+    height="${height}"
+    xmlns="http://www.w3.org/2000/svg"
+    xmlns:xlink="http://www.w3.org/1999/xlink">
+  <style>
+    .hidden {
+    stroke: none;
+    fill: none;
+    }
+    path.xstruct {
+    stroke: orange;
+    fill: none;
+    }
+    path.active {
+    stroke: black;
+    fill: none;
+    }
+    path.ystruct {
+    stroke: red;
+    fill: none;
+    }
+    path.out {
+    stroke: blue;
+    fill: none;
+    }
+    path.discarded {
+    stroke: lightblue;
+    fill: none;
+    }
+    #focus {
+    stroke: none;
+    fill: red;
+    z-index: 20;
+    }
+    circle {
+    stroke: none;
+    fill: black;
+    }
+    circle.active {
+    stroke: none;
+    fill: black;
+    }
+    circle.discarded {
+    stroke: none;
+    fill: lightgrey
+    }
+    .button {
+    stroke-width: 1px;
+    stroke: black;
+    fill: blue;
+    }
+    .button:hover {
+    fill: lightblue;
+    }
+  </style>
+  <g transform="translate (0 ${height-30})">
+     <path
+     d="M71 8 L71 28 L84 20 Z"
+     class="button"
+     id="play"
+     />
+     <path 
+	 d="M99 8 L99 28 L106 28 L106.0 8 L99 8Z M107 8 L107 28 L114 28
+	    L114 8 L107 8 Z"
+	 class="button"
+	 id="pause" />
+     <path
+	 class="button"
+	 d="M42.0 8 L42  28 L53 20 L53 28 L57 28 L57 8 L53 8 L53 16 L42 8
+	    Z"
+	 onclick="nextStep();"
+	 id="forward" />
+     <path
+	 class="button"
+	 id="backward"
+	 d="M13 8 L13 28 L17 28 L17 20 L28 28 L28 8 L17 16 L17 8 L13 8 Z"
+	 onclick="prevStep();"
+	 />
+     <path
+	 class="button"
+	 d="M137 8 L137 15 L129 15 L129 20 L137 20 L137 28 L142 28 L142 20
+	    L149 20 L149 15 L142 15 L142 8 L137 8 Z"
+	 id="faster"
+	 />
+     <path
+	 class="button"
+	 d="M164 15 L164 20 L181 20 L181 15 L164 15 Z"
+	 id="slower" />
+     <text x="200" y="20" id="msg" width="${width-200}"
+	   font-size="15"></text>
+     
+  </g>
+  <g transform="matrix(${scale} 0 0 ${scale} ${transX} ${transY})" style="stroke-width: ${1/scale};">
+${objects}
+    <line id="sweepline" x1="100" y1="0" x2="0" y2="${height}"/>
+    <circle id="focus" cx="${fst focus}" cy="${snd focus}" r="${4/scale}"/>
+  </g>
+    <script type="application/ecmascript"> <![CDATA[
+var steps =
+[${actions}];
+
+var currentStep = 0;
+var msg = document.getElementById("msg");
+
+function nextStep () {
+   if (currentStep >= steps.length - 1)
+      return;
+   currentStep++;
+   var step = steps[currentStep];
+   msg.innerHTML = step.message;
+   
+   switch(step.action)
+   {
+      case "set": 
+        for(var s of step.steps){
+           if (s.set) {
+              document.getElementById("p" + s.id).
+	      setAttribute("class", s.class);
+	      document.getElementById("lp" + s.id).
+	      setAttribute("class", s.class);
+	      document.getElementById("rp" + s.id).
+	      setAttribute("class", s.class);
+	   } 
+           else {
+              document.getElementById("p" + s.id).
+	      setAttribute("class", "hidden");
+	      document.getElementById("lp" + s.id).
+	      setAttribute("class", "hidden");
+	      document.getElementById("rp" + s.id).
+	      setAttribute("class", "hidden");
+           }
+	}
+	break;
+      case "focus":
+        var sl = document.getElementById("sweepline");
+	var fp = document.getElementById("focus");
+	sl.setAttribute("x1", step.next[0]);
+	sl.setAttribute("x2", step.next[0]);
+	fp.setAttribute("cx", step.next[0]);
+	fp.setAttribute("cy", step.next[1]);
+    }
+}
+
+function prevStep () {
+   if (currentStep <= 0)
+      return;
+   currentStep--;
+   var step = steps[currentStep];
+   msg.innerHTML = step.message;
+   switch(step.action)
+   {
+      case "set": 
+        for(i = step.steps.length-1; i >= 0; i--){
+	   s = step.steps[i];
+           if (s.set) {
+              document.getElementById("p" + s.id).
+	      setAttribute("class", "hidden");
+	      document.getElementById("lp" + s.id).
+	      setAttribute("class", "hidden");
+	      document.getElementById("rp" + s.id).
+	      setAttribute("class", "hidden");
+	   } 
+           else {
+              document.getElementById("p" + s.id).
+	      setAttribute("class", s.class);
+	      document.getElementById("lp" + s.id).
+	      setAttribute("class", s.class);
+	      document.getElementById("rp" + s.id).
+	      setAttribute("class", s.class);
+           }
+	}
+	break;
+      case "focus":
+        var sl = document.getElementById("sweepline");
+	var fp = document.getElementById("focus");
+	sl.setAttribute("x1", step.prev[0]);
+	sl.setAttribute("x2", step.prev[0]);
+	fp.setAttribute("cx", step.prev[0]);
+	fp.setAttribute("cy", step.prev[1]);
+    }
+}
+  
+  ]]> </script>
+</svg>

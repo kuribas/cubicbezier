@@ -31,13 +31,13 @@ toScaled :: (Unbox a, Num a) => BernsteinPoly a -> ScaledPoly a
 toScaled (BernsteinPoly v) =
   ScaledPoly $
   V.zipWith (*) v $ binCoeff $ V.length v - 1
-{-# NOINLINE[2] toScaled #-}
+{-# NOINLINE [2] toScaled #-}
 
 fromScaled :: (Unbox a, Fractional a) => ScaledPoly a -> BernsteinPoly a
 fromScaled (ScaledPoly v) =
     BernsteinPoly $
     V.zipWith (/) v $ binCoeff $ V.length v - 1
-{-# NOINLINE[2] fromScaled #-}
+{-# NOINLINE [2] fromScaled #-}
 
 -- | Create a bernstein polynomail from a list of coëfficients.
 listToBernstein :: (Unbox a, Num a) => [a] -> BernsteinPoly a
@@ -198,7 +198,7 @@ addScaled ba@(ScaledPoly a) bb@(ScaledPoly b)
 -- maximum of either degrees.
 (~+) :: (Unbox a, Fractional a) =>
         BernsteinPoly a -> BernsteinPoly a -> BernsteinPoly a
-(toScaled -> a) ~+ (toScaled -> b) = fromScaled $ addScaled a b
+a ~+ b = fromScaled $ addScaled (toScaled a) (toScaled b)
 {-# INLINE (~+) #-}
 
 subScaled :: (Unbox a, Num a) => ScaledPoly a -> ScaledPoly a -> ScaledPoly a

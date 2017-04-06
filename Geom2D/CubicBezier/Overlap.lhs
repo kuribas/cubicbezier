@@ -1,4 +1,4 @@
-> {-# LANGUAGE MultiWayIf, PatternGuards, TemplateHaskell, BangPatterns #-}
+> {-# LANGUAGE MultiWayIf, PatternGuards, TemplateHaskell, BangPatterns, CPP #-}
 
 Removing overlap from bezier paths in haskell
 =============================================
@@ -30,7 +30,7 @@ could be made to a mutable language:
   * modifying state:
     - `over field fun struct`: `struct.field = fun (struct.field)`
     - `modify fun`: `state = fun state`
-    - `field %= fun`: `state.field = fun (state.field)`
+    - `modifying field fun`: `state.field = fun (state.field)`
 
 Let's begin with declaring the module and library imports:
 
@@ -38,24 +38,34 @@ Let's begin with declaring the module and library imports:
 >        (boolPathOp, union, intersection, difference,
 >         exclusion, FillRule (..))
 >        where
-> import Prelude hiding (mapM)
+> import Prelude
 > import Geom2D
 > import Geom2D.CubicBezier.Basic
 > import Geom2D.CubicBezier.Intersection
+> import Geom2D.CubicBezier.Numeric
 > import Math.BernsteinPoly
-> import Data.Traversable (mapM)
+> import Data.Foldable (traverse_)
 > import Data.Functor ((<$>))
-> import Data.List (sortBy, sort)
-> import Control.Monad.State hiding (mapM)
+> import Data.List (sortBy, sort, intercalate, intersperse)
+> import Control.Monad.State.Strict
 > import Lens.Micro
 > import Lens.Micro.TH
 > import Lens.Micro.Mtl
 > import qualified Data.Map.Strict as M
-> import qualified Data.Set as S
+> import qualified Data.Set as S 
+> import Text.Printf
+> import Data.Ratio
+> import Data.Maybe (isJust, isNothing, mapMaybe)
+
+#ifdef DEBUG
+> import System.IO.Unsafe (unsafePerformIO)
+> import System.IO
+> import Debug.Trace
+#endif
 
 The basic idea is to keep curves where one side is inside the filled
 region, and the other side is outside, and discard the rest. 
-Since that could be true only of a part of the curve, we also need to
+Since that could be true only of a part of the curve, I also need to
 split each curve when it intersects
 another curve.  How to know which side is the inside, and which
 side the outside?  There are two methods which are use the most: the
@@ -66,12 +76,12 @@ when a turnratio is inside the region to be filled, and how the
 turnratio changes with each curve.
 
 Checking each pair of curves for intersections would work, but is
-rather inefficient.  We only need to check for overlap when two curves
+rather inefficient.  I only need to check for overlap when two curves
 are adjacent.  Fortunately there exist a good method from
 *computational geometry*, called the *sweep line algorithm*.  The 
 idea is to sweep a vertical line over the input, starting from
 leftmost point to the right (of course the opposite direction is also
-possible), and to update the input dynamically.  We keep track of each
+possible), and to update the input dynamically.  I keep track of each
 curve that intersects the sweepline by using a balanced tree of
 curves.  When adding a new curve, it's only necessary to check for
 intersections with the curve above and below.  Since searching on the
@@ -94,7 +104,9 @@ map is a list, since there can be many curves starting from the same
 point.
 
 > newtype PointEvent = PointEvent DPoint
->                    deriving Show
+>
+> instance Show PointEvent where
+>    show (PointEvent (Point px py)) = printf "(%.5g, %.5g)" px py
 
 When the x-coordinates are equal, use the y-coordinate to determine
 the order.
@@ -107,7 +119,7 @@ the order.
 >   compare (PointEvent (Point x1 y1)) (PointEvent (Point x2 y2)) =
 >     compare (x1, y2) (x2, y1)
 
-All curves are kept left to right, so we need to remember the
+All curves are kept left to right, so I need to remember the
 curve direction for the output:
 
 The curves intersecting the sweepline are kept in another balanced
@@ -122,6 +134,9 @@ together with a test for the *insideness* of a certain turnratio,
 allows for more flexibility.  Using this, it is possible to generalize
 this algorithm to boolean operations!
 
+The curveRank parameter is used to memoize the order in the Ystruct.
+This will avoid costly comparisons for tree rebalancing etc...
+
 The FillRule datatype is used for the exported API:
 
 > data FillRule = EvenOdd | NonZero
@@ -129,16 +144,22 @@ The FillRule datatype is used for the exported API:
 > data Curve = Curve {
 >   _bezier :: !(CubicBezier Double),
 >   _turnRatio :: !(Int, Int),
->   _changeTurn :: !((Int, Int) -> (Int, Int))}
+>   _changeTurn :: !((Int, Int) -> (Int, Int)),
+>   _curveRank :: Maybe (Ratio Integer)}
 >
 > trOne :: (Int, Int)
 > trOne = (0,0)
+>
+> between :: Ratio Integer -> Ratio Integer -> Ratio Integer
+> between a b = a +(b-a)/2
 > 
 > makeLenses ''Curve
 >
 > instance Show Curve where
->   show (Curve b a _) =
->     "Curve " ++ show b ++ " " ++ show a
+>   show (Curve (CubicBezier (Point p0x p0y) (Point p1x p1y)
+>               (Point p2x p2y) (Point p3x p3y)) (t1, t2) _ o) =
+>     printf "Curve (%.5g, %.5g) (%.5g, %.5g) (%.5g, %.5g) (%.5g, %.5g) (%i,%i) %s" 
+>     p0x p0y p1x p1y p2x p2y p3x p3y t1 t2 (show o)
 > 
 > type YStruct = S.Set Curve
 
@@ -149,111 +170,208 @@ convenient.  I use two sets to represent a focus point into the
 Y-structure, where the left set are the elements less than the
 pointEvent (above), and the right set the elements greater (below):
 
-
 > data SweepState = SweepState {
 >   _output :: !(M.Map PointEvent [CubicBezier Double]),
->   _yStructLeft :: !YStruct,
->   _yStructRight :: !YStruct,
+>   _yStruct :: !YStruct,
+>   _focusPoint :: DPoint,
 >   _xStruct :: !XStruct}
->                   deriving Show
 >                   
 > makeLenses ''SweepState
 
-Changing the focus point can be done efficiently in `O(log n)` by
-mering and splitting again:
+> singularC :: Point Double -> Curve
+> singularC p = Curve (CubicBezier p p p p) trOne id Nothing
+>
 
-> changeFocus :: DPoint -> SweepState -> SweepState
-> changeFocus p sweep =
->   let (lStr, rStr) =
->         S.split (Curve (CubicBezier p p p p) trOne id) $
->         S.union (view yStructLeft sweep) (view yStructRight sweep)
->   in set yStructLeft lStr $
->      set yStructRight rStr
->      sweep
+This handy function will be optimized away when DEBUG is false.
+
+> showCurve (CubicBezier p0 p1 p2 p3) =
+>   showPt p0 ++ showPt p1 ++ showPt p2 ++ showPt p3
+>
+> showPt :: DPoint -> String
+> showPt (Point x y) = "(" ++ show x ++ "," ++ show y ++ ")"
+>
+#ifdef DEBUG
+> type SweepStateM = StateT SweepState IO
+>
+> traceMessage :: String -> SweepStateM ()
+> traceMessage = liftIO . hPutStrLn stderr
+> 
+> assert :: Bool -> String -> SweepStateM ()
+> assert p msg = unless p $ do
+>   liftIO $ hPutStrLn stderr $ "ASSERT " ++ msg
+>
+#else
+> type SweepStateM  = State SweepState
+>
+> traceMessage _ = return ()
+>
+> assert :: Bool -> String -> SweepStateM ()
+> assert _ _ = return ()
+#endif
+
+> activate, deactivate :: [Curve] -> SweepStateM ()
+> activate cs = 
+>   traverse_ (traceMessage . ("ACTIVATE " ++) . showCurve . view bezier) cs
+> 
+> deactivate cs = 
+>   traverse_ (traceMessage . ("DEACTIVATE " ++) . showCurve . view bezier) cs
+
 
 This handy helper function will pass the first curve above to the
 given function, and if it doesn't return `Nothing`, remove it from the
 state.  It does nothing when there is no curve above.
 
-> withAbove :: (Curve -> Maybe a) -> State SweepState (Maybe a)
+> withAbove :: (Curve -> Maybe a) -> SweepStateM (Maybe a)
 > withAbove f = do
->   lStr <- use yStructLeft
->   if S.null lStr
+>   p <- use focusPoint
+>   yStr <- use yStruct
+>   let i = yStructIndex (singularC p) yStr
+>   if i < 0
 >     then return Nothing
->     else let (c, lStr') = S.deleteFindMax lStr
+>     else let c = S.elemAt i yStr
 >          in case f c of
->              Nothing ->
->                return Nothing
->              Just x -> do
->                yStructLeft .= lStr'
->                return $ Just x
+>               Nothing ->
+>                 return Nothing
+>               Just x -> do
+>                 yStructDel i
+>                 return $ Just x
 
 The same with the curve below.
 
-> withBelow :: (Curve -> Maybe a) -> State SweepState (Maybe a)
+> withBelow :: (Curve -> Maybe a) -> SweepStateM (Maybe a)
 > withBelow f = do
->   rStr <- use yStructRight
->   if S.null rStr
+>   p <- use focusPoint
+>   yStr <- use yStruct
+>   let i = yStructIndex (singularC p) yStr
+>       s = S.size yStr
+>   if i >= s-1
 >     then return Nothing
->     else let (c, rStr') = S.deleteFindMin rStr
+>     else let c = S.elemAt (i+1) yStr
 >          in case f c of
->              Nothing ->
->                return Nothing
->              Just x -> do
->                yStructRight .= rStr'
->                return $ Just x
+>               Nothing ->
+>                 return Nothing
+>               Just x -> do
+>                 yStructDel (i+1)
+>                 return $ Just x
 
 `splitYStruct` changes the focus and returns and removes any curves which end in
 the current pointEvent:
 
-> splitYStruct :: DPoint -> State SweepState [Curve]
+> splitYStruct :: DPoint -> SweepStateM [Curve]
 > splitYStruct p = do
->   modify $ changeFocus p
->   let go = do
->         mbC <- withAbove $ \c ->
->           -- remove and return c if it ends in point p
->           
->           guard (cubicC3 (_bezier c) == p) >> Just c
->         case mbC of
->          Just c ->
->            (c:) <$> go
->          Nothing -> return []
->   go
-
+>   yStr <- use yStruct
+>   focusPoint .= p
+>   traceMessage $ "CHANGEFOCUS " ++ showPt p
+>   traceMessage "MSG Remove curves ending at pointevent from Y structure" 
+>   let lStr = fst $ S.split (singularC p) yStr
+>       rightCurves = takeWhile (\c -> cubicC3 (_bezier c) == p) $
+>                     S.toDescList lStr
+>       nR = length rightCurves
+>       i = S.size lStr - nR
+>   replicateM_ nR (yStructDel i)
+>   return rightCurves
+>
 
 === Some functions on the Sweep state:
 
 Adding and removing curves from the X structure.
 
-> insertX :: PointEvent -> [Curve] -> SweepState -> SweepState
+> insertX :: PointEvent -> [Curve] -> SweepStateM ()
 > insertX p c =
->   over xStruct $ M.insertWith (++) p c
+>   modify $ over xStruct $ M.insertWith (++) p c
 >
-> xStructAdd :: Curve -> SweepState -> SweepState
-> xStructAdd c =
+> xStructAdd :: Curve -> SweepStateM ()
+> xStructAdd c = do
+>   traceMessage $ "XSTRUCTADD " ++ showCurve (view bezier c)
 >   insertX (PointEvent $ cubicC0 $
->                         view bezier c) [c]
+>            view bezier c) [c]
 >
-> xStructRemove :: State SweepState (PointEvent, [Curve])
-> xStructRemove = zoom xStruct $ state M.deleteFindMin
+> xStructRemove :: SweepStateM (PointEvent, [Curve])
+> xStructRemove = do
+>   str <- use xStruct
+>   return str
+>   (p, c) <- zoom xStruct $ state M.deleteFindMin
+>   traverse_ (traceMessage . ("XSTRUCTREM " ++) .
+>              showCurve . view bezier) c
+>   str <- use xStruct
+>   return str
+>   return (p, c)
+>
+> yStructIndex :: Curve -> YStruct -> Int
+> yStructIndex c str = S.size (fst $ S.split c str) - 1
+>
+> yStructDel :: Int -> SweepStateM ()
+> yStructDel i = do
+>   str <- use yStruct
+>   traceMessage $ "YSTRUCTREM " ++ showCurve (view bezier $ S.elemAt i str)
+>   yStruct .= S.deleteAt i str
+>
+
+Insert the curve into the Y structure.  First lookup the position of
+the curve, then calculate the rank of the curve, using the surrounding
+elements.  Insert the curve using the rank.  This will avoid repeating
+expensive operations.
+
+> 
+> yStructAdd :: Curve -> SweepStateM ()
+> yStructAdd c = do
+>   str <- use yStruct
+>   traceMessage $ "YSTRUCTADD " ++ showCurve (view bezier c)
+>   traceMessage $ "YSTRUCT: " ++
+>       (concat $ intersperse "\n  " $ map (showCurve . view bezier) $ S.toList str)
+>   assert (isNothing (_curveRank c))
+>     "CURVE ALREADY HAS A RANK IN THE YSTRUCT" 
+>   assert (yStructConsistent c str)
+>    ("Y STRUCT NOT CONSISTENT WITH CURVE:" ++
+>    show (map (compare c) (S.toAscList str)) )
+>   let i = yStructIndex c str
+>       s = S.size str
+>       newC 
+>         | s == 0 = set curveRank (Just 0) c
+>         | i >= s-1 = set curveRank ((+1) <$> _curveRank (S.elemAt (s-1) str)) c
+>         | i < 0 = set curveRank (subtract 1 <$> _curveRank (S.elemAt 0 str)) c
+>         | otherwise = set curveRank (liftM2 between
+>                                       (_curveRank $ S.elemAt i str)
+>                                       (_curveRank $ S.elemAt (i+1) str)) c
+>   assert (not $ S.member c str)
+>     ("CURVE ALREADY IN YSTRUCT: " ++ showCurve (view bezier c))
+>   assert (S.size str < S.size (S.insert newC str)) $
+>     "CURVE NOT ADDED TO YSTRUCT" ++ show newC 
+>   yStruct .= S.insert newC str
+> 
+> yStructConsistent :: Curve -> YStruct -> Bool
+> yStructConsistent c str =
+>   all (> c) $ dropWhile (< c) $
+>   S.toAscList str
+>
+> yStructOverlap :: Curve -> YStruct -> [String]
+> yStructOverlap c str =
+>   mapMaybe checkOverlap $ S.toAscList str
+>   where checkOverlap c2 =
+>           case splitMaybe c c2 1e-5 of
+>             (Nothing, Nothing) -> Nothing
+>             _ -> Just (show c2 ++ "\n")
 
 To compare curves vertically, take the the curve which starts the
-rightmost, and see if it falls below or above the curve.  If the first control points are coincident, test the
-last control points instead. The curves in the Y-structure shouldn't
-intersect (except in the endpoints), so these cases don't have to be
-handled.  To lookup a single point, I use a singular bezier curve.
+rightmost, and see if it falls below or above the curve.  If the first
+control points are coincident, test the last control points instead,
+or the midpoint.  This works because if the first point is coincident
+the curves shouldn't intersect except in the endpoints (see #splitAndOrder).
+To lookup a single point, I use a singular bezier curve.
 
 > instance Eq Curve where
->   Curve c1 t1 ct1 == Curve c2 t2 ct2 =
->     c1 == c2 && t1 == t2 && ct1 (ct2 t1) == t1
+>    Curve _ _ _ (Just o1) == Curve _ _ _ (Just o2) = o1 == o2
+>    Curve c1 t1 ct1 _ == Curve c2 t2 ct2 _ =
+>     c1 == c2 && t1 == t2 && ct1 t1 == ct2 t2
 >     
 > instance Ord Curve where
->   compare (Curve c1@(CubicBezier p0 p1 p2 p3) tr1 _)
->     (Curve c2@(CubicBezier q0 q1 q2 q3) tr2 _)
+>   compare (Curve _ _ _ (Just o1)) (Curve _ _ _ (Just o2)) = compare o1 o2
+>   compare (Curve c1@(CubicBezier p0 p1 p2 p3) tr1 _ _)
+>     (Curve c2@(CubicBezier q0 q1 q2 q3) tr2 _ _)
 >     | p0 == q0 = if
 >         | p3 == q3 ->
 >             -- compare the midpoint
->             case (compVert (evalBezier c1 0.5) c2) of
+>             case compVert (evalBezier c1 0.5) c2 of
 >              LT -> LT
 >              GT -> GT
 >              EQ ->
@@ -261,7 +379,7 @@ handled.  To lookup a single point, I use a singular bezier curve.
 >                compare (tr1, PointEvent p1, PointEvent p2)
 >                (tr2, PointEvent q1, PointEvent q2)
 >         | pointX p3 < pointX q3 ->
->             case (compVert p3 c2) of
+>             case compVert p3 c2 of
 >             LT -> LT
 >             EQ -> LT
 >             GT -> GT
@@ -276,14 +394,14 @@ handled.  To lookup a single point, I use a singular bezier curve.
 >        EQ -> LT
 >        GT -> LT
 >     | otherwise =
->       case (compVert p0 c2) of
+>       case compVert p0 c2 of
 >       LT -> LT
 >       EQ -> GT
 >       GT -> GT
 
 Compare a point with a curve.  See if it falls below or above the hull
 first.  Otherwise find the point on the curve with the same
-X-coordinate by solving a cubic equation.
+X-coordinate by iterating.
 
 > compVert :: DPoint -> CubicBezier Double -> Ordering
 > compVert p c
@@ -305,9 +423,7 @@ X-coordinate by solving a cubic equation.
 >     compare (pointY p0) y1
 >   | otherwise = compare y2 y1
 >   where
->     t = findX x1 c1 $
->         maximum (map maxp [p0, p1, p2, p3])*1e-12
->     maxp (Point x y) = max (abs x) (abs y)
+>     t = findX c1 x1 (maximum (map (abs.pointX) [p0, p1, p2, p3])*1e-14)
 >     y2 = pointY $ evalBezier c1 t
 
 === Comparing against the hull {#hull}
@@ -363,18 +479,18 @@ I also do snaprounding to prevent points closer than the tolerance.
 >   concatMap (splitVert tol)
 >   where toCurve c@(CubicBezier p0 _ _ p3) =
 >           case compare (pointX p0) (pointX p3) of
->            LT -> [(PointEvent p0, [Curve c trOne chTr])]
->            GT -> [(PointEvent p3, [Curve (reorient c) trOne chTrBack]),
+>            LT -> [(PointEvent p0, [Curve c trOne chTr Nothing])]
+>            GT -> [(PointEvent p3, [Curve (reorient c) trOne chTrBack Nothing]),
 >                   (PointEvent p0, [])]
 >            -- vertical curve
 >            EQ | pointY p0 > pointY p3 ->
->                 [(PointEvent p0, [Curve c trOne chTr])]
+>                 [(PointEvent p0, [Curve c trOne chTr Nothing])]
 >               | otherwise ->
->                 [(PointEvent p3, [Curve (reorient c) trOne chTrBack]),
+>                 [(PointEvent p3, [Curve (reorient c) trOne chTrBack Nothing]),
 >                  (PointEvent p0, [])]
 >
 > splitVert :: Double -> CubicBezier Double -> [CubicBezier Double]
-> splitVert tol curve@(CubicBezier c0 c1 c2 c3) =
+> splitVert tol curve@(CubicBezier c0 c1 c2 c3) = 
 >   uncurry splitBezierN $
 >   adjustLast $
 >   adjustFirst (curve, vert)
@@ -400,7 +516,7 @@ I also do snaprounding to prevent points closer than the tolerance.
 main loop
 ---------
 
-For the main loop, we remove the leftmost point from the
+For the main loop, I remove the leftmost point from the
 X-structure, and do the following steps:
 
   1. Split any curves which come near the current pointEvent.
@@ -417,37 +533,61 @@ below instead.  Adjust the turnRatios for each curve.
 
   5. Loop until the X-structure is empty
 
-> loopEvents :: ((Int, Int) -> Bool) -> Double -> SweepState -> SweepState
-> loopEvents isInside tol sweep 
->   | M.null $ view xStruct sweep = sweep
->   | otherwise =
->     loopEvents isInside tol $!
->     flip execState sweep $ do
->       -- remove leftmost point from X structure
+> loopEvents :: ((Int, Int) -> Bool) -> Double -> SweepStateM ()
+> loopEvents isInside tol = do
+>   xStr <- use xStruct
+>   unless (M.null xStr) $ do
 >       (PointEvent p, curves) <- xStructRemove
->       -- change focus, and remove curves ending at current
->       -- pointevent from Y structure
+>       activate curves
+>       
 >       ending <- splitYStruct p
+>       activate ending
+>
 >       -- split near curves
+>       traceMessage "MSG Split curves near the focuspoint." 
 >       (ending2, rightSubCurves) <- splitNearPoints p tol
+>
+>       activate ending2
+>       activate rightSubCurves
+>       traceMessage "MSG Output curves"
+>        
 >       -- output curves to the left of the sweepline.
->       modify $ filterOutput (ending ++ ending2) isInside 
+>       deactivate (ending ++ ending2)
+>       filterOutput (ending ++ ending2) isInside 
 >       let allCurves = rightSubCurves ++ curves
 >       if null allCurves
+> 
 >          -- split surrounding curves
->         then splitSurround tol
+>         then do
+>              traceMessage "MSG Split curves around pointevent."
+>              splitSurround tol
 >         else do
+> 
 >         -- sort curves
+>         traceMessage "MSG Sort curves."
+>         
 >         sorted <- splitAndOrder tol allCurves
+>         deactivate allCurves
+>         activate sorted
+> 
 >         -- split curve above
+>         traceMessage "MSG Split curve above sorted curves."
+>         deactivate sorted
 >         curves2 <- splitAbove sorted tol
+>         activate curves2
+> 
 >         -- add curves to Y structure
+>         traceMessage "MSG Add curves to Y structure."
+>         deactivate curves2
 >         addMidCurves curves2 tol
+>
+>       loopEvents isInside tol
+
 
 Send curves to output
 ---------------------
 
-> outputPaths :: (M.Map PointEvent [CubicBezier Double]) -> [ClosedPath Double]
+> outputPaths :: M.Map PointEvent [CubicBezier Double] -> [ClosedPath Double]
 > outputPaths m
 >   | M.null m = []
 >   | otherwise = outputNext m
@@ -462,7 +602,7 @@ Send curves to output
 >     outputNext !m
 >       | M.null m = []
 >       | otherwise = 
->         let ((PointEvent p0, (c0:cs)), m0) =
+>         let ((PointEvent p0, c0:cs), m0) =
 >               M.deleteFindMin m
 >             m0' | null cs = m0
 >                 | otherwise = M.insert (PointEvent p0) cs m0
@@ -488,20 +628,22 @@ determines the *insideness* of a give turnratio.  For example for the
 nonzero-rule, this would be `(> 0)`.  This inserts the curve into the
 output map.
 
-> filterOutput :: [Curve] -> ((Int, Int) -> Bool) -> SweepState -> SweepState
-> filterOutput curves isInside sweep =
->   foldl (flip $ outputCurve isInside) sweep curves
+> filterOutput :: [Curve] -> ((Int, Int) -> Bool) -> SweepStateM ()
+> filterOutput curves isInside =
+>   mapM_ (outputCurve isInside)  curves
 >
-> outputCurve :: ((Int, Int) -> Bool) -> Curve -> SweepState -> SweepState
-> outputCurve isInside (Curve c tr op)
+> outputCurve :: ((Int, Int) -> Bool) -> Curve -> SweepStateM ()
+> outputCurve isInside (Curve c tr op _)
 >   | isInside (op tr) /= isInside tr =
 >       let c' | isInside tr = reorient c
 >              | otherwise = c
->       in over output (M.insertWith (++) (PointEvent $ cubicC0 c') [c'])
->   | otherwise = id
+>       in do traceMessage $ "OUTPUT " ++ showCurve c
+>             modifying output (M.insertWith (++) (PointEvent $ cubicC0 c') [c'])
+>   | otherwise =
+>       traceMessage $ "DISCARD " ++ showCurve c
 
-Test for intersections and split:
----------------------------------
+Test for intersections and split: (#splitAndOrder)
+--------------------------------------------------
 
 Since the curves going out of the current pointEvent in the X-structure are
 unordered, they need to be ordered first.  First they are ordered by
@@ -512,31 +654,35 @@ whole curve.
 To do this, I implemented a monadic insertion sort.  First the curves are split
 in the statemonad, then they are compared.
 
-> splitAndOrder :: Double -> [Curve] -> State SweepState [Curve]
+> splitAndOrder :: Double -> [Curve] -> SweepStateM [Curve]
 > splitAndOrder tol curves =
 >   sortSplit tol $
 >   sortBy compDeriv curves
 >
 > compDeriv :: Curve -> Curve -> Ordering
-> compDeriv (Curve (CubicBezier p0 p1 _ _) _ _)
->   (Curve (CubicBezier q0 q1 _ _) _ _) =
->   compare (vectorCross (p1^-^p0) (q1^-^ q0)) 0
+> compDeriv (Curve (CubicBezier p0 p1 _ _) _ _ _)
+>   (Curve (CubicBezier q0 q1 _ _) _ _ _) =
+>   compare (slope (q1^-^ q0)) (slope (p1^-^p0)) 
+>
+> slope (Point 0 0) = 0
+> slope (Point x y) = y/x
+
 
 Insertion sort, by splitting and comparing.  This should be efficient
 enough, since ordering by derivative should mostly order the curves.
 
-> sortSplit :: Double -> [Curve] -> State SweepState [Curve]
+> sortSplit :: Double -> [Curve] -> SweepStateM [Curve]
 > sortSplit _ [] = return []
 > sortSplit tol (x:xs) =
 >   insertM x tol =<<
 >   sortSplit tol xs
 >
-> insertM :: Curve -> Double -> [Curve] -> State SweepState [Curve]
+> insertM :: Curve -> Double -> [Curve] -> SweepStateM [Curve]
 > insertM x _ [] = return [x]
 > insertM x tol (y:ys) =
 >   case curveOverlap x y tol of
 >    Just (c1, c2) -> do
->      mapM (modify . xStructAdd) c2
+>      traverse_ xStructAdd c2
 >      insertM c1 tol ys
 >    Nothing -> do
 >      (x', y') <- splitM x y tol
@@ -544,17 +690,18 @@ enough, since ordering by derivative should mostly order the curves.
 >        then return (x':y':ys)
 >        else (y':) <$> insertM x' tol ys
 >
-> splitM :: Curve -> Curve -> Double -> State SweepState (Curve, Curve)
+> splitM :: Curve -> Curve -> Double -> SweepStateM (Curve, Curve)
 > splitM x y tol =
 >   case splitMaybe x y tol of
 >   (Just (a, b), Just (c, d)) -> do
->     modify $ insertX (PointEvent $ cubicC0 $ view bezier b) [b, d]
+>     xStructAdd b
+>     xStructAdd d
 >     return (a, c)
 >   (Nothing, Just (c, d)) -> do
->     modify $ insertX (PointEvent $ cubicC0 $ view bezier d) [d]
+>     xStructAdd d
 >     return (x, c)
 >   (Just (a, b), Nothing) -> do
->     modify $ insertX (PointEvent $ cubicC0 $ view bezier b) [b]
+>     xStructAdd b
 >     return (a, y)
 >   (Nothing, Nothing) ->
 >     return (x, y)
@@ -565,49 +712,50 @@ when one of the curves is intersected at the endpoints, in order not
 to create singular curves.
 
 > updateTurnRatio :: Curve -> Curve -> Curve
-> updateTurnRatio (Curve _ tr chTr) =
+> updateTurnRatio (Curve _ tr chTr _) =
 >   set turnRatio (chTr tr)
 >
 > propagateTurnRatio :: Curve -> [Curve] -> [Curve]
 > propagateTurnRatio cAbove l =
 >   tail $ scanl updateTurnRatio cAbove l
 >
-> splitAbove :: [Curve] -> Double -> State SweepState [Curve]
+> splitAbove :: [Curve] -> Double -> SweepStateM [Curve]
 > splitAbove [] _ = return []
 > splitAbove (c:cs) tol = do
->   lStr <- use yStructLeft
->   if S.null lStr
+>   yStr <- use yStruct
+>   p <- use focusPoint
+>   let i = yStructIndex (singularC p) yStr
+>   if i < 0
 >     then let c' = set turnRatio trOne c
->          in return $ c':propagateTurnRatio c' cs
->     else do
->     let (cAbove, lStr') = S.deleteFindMax lStr
->     case splitMaybe c cAbove tol of
->      (Nothing, Nothing) ->
->        return $ propagateTurnRatio cAbove $ c:cs
->      (Just (c1, c2), Nothing) ->
->        if cubicC3 (_bezier c1) == cubicC0 (_bezier cAbove)
->        then do
->          modify $ xStructAdd cAbove . xStructAdd c2
->          yStructLeft .= lStr'
->          return $ propagateTurnRatio cAbove $ c1:cs
->        else do
->          modify $ xStructAdd c2
->          return $ propagateTurnRatio cAbove $ c1:cs
->      (Nothing, Just (c3, c4)) ->
->        if cubicC3 (_bezier c3) == cubicC0 (_bezier c)
->        then error "curve intersecting pointevent"
->        else do
->          modify $ xStructAdd c4
->          yStructLeft .= S.insert c3 lStr'
->          return $ propagateTurnRatio cAbove $ c:cs
->      (Just (c1, c2), Just (c3, c4)) -> do
->        modify $ xStructAdd c2 . xStructAdd c4
->        yStructLeft .= S.insert c3 lStr'
->        return $ propagateTurnRatio cAbove $ c1:cs
+>                 in return $ c':propagateTurnRatio c' cs
+>     else 
+>       let cAbove = S.elemAt i yStr
+>       in case splitMaybe c cAbove tol of
+>         (Nothing, Nothing) ->
+>           return $ propagateTurnRatio cAbove $ c:cs
+>         (Just (c1, c2), Nothing)
+>           | cubicC3 (_bezier c1) == cubicC0 (_bezier cAbove)
+>             -> do
+>               xStructAdd cAbove; xStructAdd c2
+>               yStructDel i
+>               return $ propagateTurnRatio cAbove $ c1:cs
+>           | otherwise -> do
+>               xStructAdd c2
+>               return $ propagateTurnRatio cAbove $ c1:cs
+>         (Nothing, Just (c3, c4)) -> do
+>             assert (cubicC3 (_bezier c3) /= cubicC0 (_bezier c)) $
+>               "curve intersecting pointevent: cAbove " ++ show cAbove
+>             xStructAdd c4
+>             yStructDel i; yStructAdd c3
+>             return $ propagateTurnRatio cAbove $ c:cs
+>         (Just (c1, c2), Just (c3, c4)) -> do
+>           xStructAdd c2; xStructAdd c4
+>           yStructDel i; yStructAdd c3
+>           return $ propagateTurnRatio cAbove $ c1:cs
 
-Split curves near the point.  Return the curves starting from this point, and the index of the last split point
+Split curves near the point.  Return the curves starting from this point.
 
-> splitNearPoints :: DPoint -> Double -> State SweepState ([Curve], [Curve])
+> splitNearPoints :: DPoint -> Double -> SweepStateM ([Curve], [Curve])
 > splitNearPoints p tol = do
 >   curves1 <- splitNearDir withAbove p tol
 >   curves2 <- splitNearDir withBelow p tol
@@ -615,9 +763,9 @@ Split curves near the point.  Return the curves starting from this point, and th
 >           map snd curves1 ++ map snd curves2)
 >
 > splitNearDir  :: ((Curve -> Maybe (Curve, Double))
->                   -> State SweepState (Maybe (Curve, Double)))
+>                   -> SweepStateM (Maybe (Curve, Double)))
 >               -> DPoint -> Double
->               -> State SweepState [(Curve, Curve)]
+>               -> SweepStateM [(Curve, Curve)]
 > splitNearDir dir p tol = do
 >   mbSplit <- dir $ \curve ->
 >     (,) curve <$>
@@ -631,74 +779,74 @@ Split curves near the point.  Return the curves starting from this point, and th
 >                snapRound tol <$> c1
 >          c2' = adjust curve $ adjustC0 p $
 >                snapRound tol <$> c2
+>      traceMessage $ "MSG Splitting curve " ++ showCurve (view bezier curve)
 >      ((c1', c2'):) <$> splitNearDir dir p tol
 
 Add the sorted curves starting at point to the Y-structure, and test
 last curve with curve below.
 
-> addMidCurves :: [Curve] -> Double -> State SweepState ()
+> addMidCurves :: [Curve] -> Double -> SweepStateM ()
 > addMidCurves [] _ = return ()
 > addMidCurves [c] tol =
 >   splitBelow c tol
 > addMidCurves (c:cs) tol = do
->   yStructLeft %= S.insert c 
 >   addMidCurves cs tol
+>   yStructAdd c 
 >   
-> splitBelow :: Curve -> Double -> State SweepState ()
+> splitBelow :: Curve -> Double -> SweepStateM ()
 > splitBelow c tol = do
->   rStr <- use yStructRight
->   let (cBelow, rStr') = S.deleteFindMin rStr
->   if S.null rStr
->     then yStructLeft %= S.insert c
+>   yStr <- use yStruct
+>   p <- use focusPoint
+>   let i = yStructIndex (singularC p) yStr
+>   if i >= S.size yStr-1
+>     then yStructAdd c
 >     else
->     case splitMaybe c cBelow tol of
->      (Nothing, Nothing) ->
->        yStructLeft %= S.insert c
->      (Nothing, Just (c3, c4)) ->
->        if cubicC3 (_bezier c3) == cubicC0 (_bezier c)
->        then error "internal error: splitBelow: curve starting in future"
->        else do
->          modify $ xStructAdd c4
->          yStructLeft %= S.insert c . S.insert c3
->          yStructRight .= rStr'
->      (Just (c1, c2), Nothing) ->
->        if cubicC3 (_bezier c1) == cubicC0 (_bezier cBelow)
->        then error "internal error: splitBelow: curve intersecting pointevent."
->        else do
->          modify $ xStructAdd c2
->          yStructLeft %= S.insert c1
->      (Just (c1, c2), Just (c3, c4)) -> do
->        modify $ xStructAdd c2 . xStructAdd c4
->        yStructLeft %= S.insert c1 . S.insert c3
->        yStructRight .= rStr'
+>       let cBelow = S.elemAt (i+1) yStr
+>       in case splitMaybe c cBelow tol of
+>         (Nothing, Nothing) -> 
+>           yStructAdd c
+>         (Nothing, Just (c3, c4)) -> do
+>           assert (cubicC3 (_bezier c3) /= cubicC0 (_bezier c)) $
+>             "splitBelow: curve starting in future: c3 == " ++
+>              show c3 ++ " c == " ++ show c
+>           traceMessage "MSG Split lower curve only." 
+>           xStructAdd c4
+>           yStructDel (i+1); yStructAdd c3; yStructAdd c
+>         (Just (c1, c2), Nothing) -> do
+>           traceMessage "MSG split curve above lower curve"
+>           assert (cubicC3 (_bezier c1) /= cubicC0 (_bezier cBelow))
+>             "SPLITBELOW: CURVE INTERSECTING POINTEVENT." 
+>           xStructAdd c2
+>           yStructAdd c1
+>         (Just (c1, c2), Just (c3, c4)) -> do
+>           traceMessage "MSG split lower curve and curve above."
+>           xStructAdd c2; xStructAdd c4
+>           yStructDel (i+1); yStructAdd c3; yStructAdd c1
 
-If no curves start from the point, we have to check if the surrounding
+If no curves start from the point, check if the surrounding
 curves overlap.
 
-> splitSurround :: Double -> State SweepState ()
+> splitSurround :: Double -> SweepStateM ()
 > splitSurround tol = do
->   lStr <- use yStructLeft
->   rStr <- use yStructRight
->   if S.null lStr || S.null rStr
->     then return ()
->     else do
->     let (cAbove, lStr') = S.deleteFindMax lStr
->         (cBelow, rStr') = S.deleteFindMin rStr
->     case splitMaybe cAbove cBelow tol of
+>   p <- use focusPoint
+>   yStr <- use yStruct
+>   let i = yStructIndex (singularC p) yStr
+>       s = S.size yStr
+>   when (i >= 0 && i < s-1) $
+>    case splitMaybe (S.elemAt i yStr) (S.elemAt (i+1) yStr) tol of
 >      (Just (c1, c2), Just (c3, c4)) -> do
->        modify $ xStructAdd c2 .
->          xStructAdd c4
->        yStructLeft .= S.insert c1 lStr'
->        yStructRight .= S.insert c3 rStr'
+>        xStructAdd c2; xStructAdd c4
+>        yStructDel i; yStructDel i
+>        yStructAdd c3; yStructAdd c1
 >      (Just (c1, c2), Nothing) -> do
->        modify $ xStructAdd c2
->        yStructLeft .= S.insert c1 lStr'
+>        xStructAdd c2
+>        yStructDel i; yStructAdd c1
 >      (Nothing, Just (c1, c2)) -> do
->        modify $ xStructAdd c2
->        yStructRight .= S.insert c1 rStr'
+>        xStructAdd c2
+>        yStructDel (i+1); yStructAdd c1
 >      (Nothing, Nothing) ->
 >        return ()
-  
+
 
 === Find curve intersections
 
@@ -721,12 +869,12 @@ of overlap is the same in both curves.
 >     b2 = view bezier c2
 >
 > adjustSplit :: Curve -> (CubicBezier Double, CubicBezier Double) -> (Curve, Curve)
-> adjustSplit curve (b1, b2)   =
->   (set bezier b1 curve,
->    set bezier b2 curve)
+> adjustSplit curve (b1, b2) =
+>   (set curveRank Nothing $ set bezier b1 curve,
+>    set curveRank Nothing $ set bezier b2 curve)
 >
 > adjust :: Curve -> CubicBezier Double -> Curve
-> adjust curve curve2 = set bezier curve2 curve
+> adjust curve curve2 = set curveRank Nothing $ set bezier curve2 curve
 >
 > snapRoundBezier :: Double -> CubicBezier Double -> CubicBezier Double
 > snapRoundBezier tol = fmap (snapRound tol)
@@ -745,40 +893,30 @@ intersections that necessary.
 > nextIntersection b1@(CubicBezier p0 _ _ p3) b2@(CubicBezier q0 _ _ q3) tol ((t1, t2): ts)
 >   | atStart1 && atStart2 =
 >       nextIntersection b1 b2 tol ts
->   | atStart1 =
->     (Nothing,
->      Just (adjustC3 p0 $ snapRoundBezier tol b2l,
->            adjustC0 p0 $ snapRoundBezier tol b2r))
->   | atStart2 =
->     (Just (adjustC3 q0 $ snapRoundBezier tol b1l,
->            adjustC0 q0 $ snapRoundBezier tol b1r),
->      Nothing)
->   | atEnd1 && atEnd2 = (Nothing, Nothing)
->   | atEnd1 =
->     (Nothing,
->      Just (adjustC3 p3 $ snapRoundBezier tol b2l,
->            adjustC0 p3 $ snapRoundBezier tol b2r))
->   | atEnd2 =
->     (Just (adjustC3 q3 $ snapRoundBezier tol b1l,
->            adjustC0 q3 $ snapRoundBezier tol b1r),
->      Nothing)
 >   | bezierEqual b1l b2l tol =
 >       nextIntersection b1 b2 tol ts
 >   | otherwise =
->       let pMid = snapRound tol <$> cubicC3 b1l
->       in (Just (snapRoundBezier tol b1l,
->                 snapRoundBezier tol b1r),
->           Just (adjustC3 pMid $ snapRoundBezier tol b2l,
->                 adjustC0 pMid $ snapRoundBezier tol b2r))
->    where
->      x1 = evalBezier b1 t1
->      x2 = evalBezier b2 t2
->      atStart1 = vectorDistance (cubicC0 b1) x1 < tol
->      atStart2 = vectorDistance (cubicC0 b2) x2 < tol
->      atEnd1 = vectorDistance (cubicC3 b1) x1 < tol
->      atEnd2 = vectorDistance (cubicC3 b2) x2 < tol
->      (b1l, b1r) = splitBezier b1 t1
->      (b2l, b2r) = splitBezier b2 t2
+>       (bs1, bs2)
+>   where
+>     bs1 | atStart1 || atEnd1 = Nothing
+>         | otherwise = Just (adjustC3 pMid $ snapRoundBezier tol b1l,
+>                             adjustC0 pMid $ snapRoundBezier tol b1r)
+>     bs2 | atStart2 || atEnd2 = Nothing
+>         | otherwise = Just (adjustC3 pMid $ snapRoundBezier tol b2l,
+>                             adjustC0 pMid $ snapRoundBezier tol b2r)
+>     pMid | atStart1 = cubicC0 b1
+>          | atEnd1 = cubicC3 b1
+>          | atStart2 = cubicC0 b2
+>          | atEnd1 = cubicC3 b2
+>          | otherwise = snapRound tol <$> cubicC3 b1l
+>     x1 = evalBezier b1 t1
+>     x2 = evalBezier b2 t2
+>     atStart1 = vectorDistance (cubicC0 b1) x1 < tol
+>     atStart2 = vectorDistance (cubicC0 b2) x2 < tol
+>     atEnd1 = vectorDistance (cubicC3 b1) x1 < tol
+>     atEnd2 = vectorDistance (cubicC3 b2) x2 < tol
+>     (b1l, b1r) = splitBezier b1 t1
+>     (b2l, b2r) = splitBezier b2 t2
 > 
 > adjustC0 :: Point a -> CubicBezier a -> CubicBezier a
 > adjustC0 p (CubicBezier _ p1 p2 p3) = CubicBezier p p1 p2 p3
@@ -875,8 +1013,7 @@ changeTurn functions.
 
 > pointOnCurve :: Double -> DPoint -> CubicBezier Double -> Maybe Double
 > pointOnCurve tol p c1
->   | (t:_) <-
->     closest c1 p tol,
+>   | t <- closest c1 p tol,
 >     p2 <- evalBezier c1 t,
 >     vectorDistance p p2 < tol = Just t
 >   | otherwise = Nothing
@@ -906,25 +1043,29 @@ distances between each point will never exceed `eps`.
 >   where dist = max (abs $ ld b0) (abs $ ld b3)
 >         ld = lineDistance (Line a0 a3)
 
-=== Finding the on curve point at the X coordinate {#findx}
-
-Solve a cubic equation to find the X coordinate.  This should be
-converted to a closed form solver for efficiency.
-
-> findX :: Double -> CubicBezier Double -> Double -> Double
-> findX x c@(CubicBezier p0 p1 p2 p3) eps =
->   head $ bezierFindRoot bez 0 1 $
->   bezierParamTolerance c (eps/10)
->   where bez = listToBernstein 
->               (map pointX [p0, p1, p2, p3]) ~-
->               listToBernstein [x, x, x, x]
-
 Higher level functions
 ----------------------
 
 > fillFunction :: FillRule -> Int -> Bool
-> fillFunction NonZero = (>0)
+> fillFunction NonZero = (/=0)
 > fillFunction EvenOdd = odd
+>
+> newSweep :: XStruct -> SweepState
+> newSweep xStr = SweepState M.empty S.empty undefined xStr
+>
+> runSweep :: SweepState -> SweepStateM () -> SweepState
+#if DEBUG
+> runSweep sweep m = 
+>   unsafePerformIO $ do
+>   hPutStrLn stderr "XSTRUCTBEGIN" 
+>   mapM_ (hPutStrLn stderr . showCurve) $ map (view bezier) $
+>    concat $ M.elems $ view xStruct sweep
+>   hPutStrLn stderr "XSTRUCTEND" 
+>   execStateT m sweep
+#else
+> runSweep sweep m =
+>   execState m sweep
+#endif
 
 > -- | `O((n+m)*log(n+m))`, for `n` segments and `m` intersections.
 > -- Union of paths, removing overlap and rounding to the given
@@ -934,14 +1075,21 @@ Higher level functions
 >          -> Double           -- ^ Tolerance
 >          -> [ClosedPath Double]
 > union p fill tol =
->   outputPaths out
+>   outputPaths $ view output $ runSweep sweep $ 
+>   loopEvents (fillFunction fill . fst) tol
 >   where
->     out = view output $
->           loopEvents (fillFunction fill . fst) tol sweep
->     sweep = SweepState M.empty S.empty S.empty xStr
+>     sweep = newSweep xStr
 >     xStr = makeXStruct (over _1 $ subtract 1) (over _1 (+1)) tol $
 >            concatMap closedPathCurves p
 >
+> union' p fill tol =
+>   outputPaths $ view output $ runSweep sweep $ 
+>   loopEvents (fillFunction fill . fst) tol
+>   where
+>     sweep = newSweep xStr
+>     xStr = makeXStruct (over _1 $ subtract 1) (over _1 (+1)) tol p
+>
+> 
 > -- | `O((n+m)*log(n+m))`, for `n` segments and `m` intersections.
 > -- Combine paths using the given boolean operation
 > boolPathOp :: (Bool -> Bool -> Bool) -- ^ operation
@@ -951,12 +1099,13 @@ Higher level functions
 >           -> Double                  -- ^ tolerance 
 >           -> [ClosedPath Double]
 > boolPathOp op p1 p2 fill tol =
->   outputPaths $ view output $
->   loopEvents isInside tol sweep
+>   outputPaths $ view output $ runSweep sweep $
+>   loopEvents isInside tol
 >   where
 >     isInside (a, b) = fillFunction fill a `op`
 >                       fillFunction fill b
->     sweep = SweepState M.empty S.empty S.empty xStr
+>     sweep = newSweep xStr
+>
 >     xStr = M.unionWith (++)
 >            (makeXStruct 
 >             (over _1 (subtract 1))
@@ -979,3 +1128,10 @@ Higher level functions
 >
 > -- | path exclusion
 > exclusion = boolPathOp (\a b -> if a then not b else b)
+>
+
+handy for debugging: 
+
+>
+> -- mkBezier (a, b) (c, d) (e, f) (g, h) = CubicBezier (Point a b) (Point c d) (Point e f) (Point g h)
+> --x = [mkBezier (1.7945835892524933,2.0547397002191734)(1.7945835892524933,1.4415012999400492)(2.2917115821994845,0.9443733069930581)(2.9049499824786085,0.9443733069930581),mkBezier (1.7945835892524933,2.0547397002191734)(1.7945835892524933,2.667978238848005)(2.2917115821994845,3.1651062317949963)(2.9049499824786085,3.1651062317949963),mkBezier (2.110720695890836,7.885290987712098)(2.110720695890836,7.516067576338687)(2.410035446506936,7.216752964072295)(2.7792588578803468,7.216752964072295),mkBezier (2.110720695890836,7.885290987712098)(2.110720695890836,8.25451439908551)(2.410035446506936,8.553829149701608)(2.7792588578803468,8.553829149701608),mkBezier (2.7323502826483033,3.689897110469715)(2.7323502826483033,3.1926138891505564)(3.1354780884677687,2.789486083331091)(3.632761309786927,2.789486083331091),mkBezier (2.7323502826483033,3.689897110469715)(2.7323502826483033,4.187180470138581)(3.1354780884677687,4.590308275958047)(3.632761309786927,4.590308275958047),mkBezier (2.7792588578803468,8.553829149701608)(3.148482269253758,8.553829149701608)(3.4477968815201496,8.25451439908551)(3.4477968815201496,7.885290987712098),mkBezier (2.7792588578803468,7.216752964072295)(3.148482269253758,7.216752964072295)(3.4477968815201496,7.516067576338687)(3.4477968815201496,7.885290987712098),mkBezier (2.9049499824786085,3.1651062317949963)(3.5181885211074406,3.1651062317949963)(4.015316514054431,2.667978238848005)(4.015316514054431,2.0547397002191734),mkBezier (2.9049499824786085,0.9443733069930581)(3.5181885211074406,0.9443733069930581)(4.015316514054431,1.4415012999400492)(4.015316514054431,2.0547397002191734),mkBezier (3.632761309786927,4.590308275958047)(4.130044669455794,4.590308275958047)(4.533172336925551,4.187180470138581)(4.533172336925551,3.689897110469715),mkBezier (3.632761309786927,2.789486083331091)(4.130044669455794,2.789486083331091)(4.533172336925551,3.1926138891505564)(4.533172336925551,3.689897110469715),mkBezier (4.282618249080003,8.774851108917153)(4.282618249080003,8.216804972625443)(4.735004084869613,7.764419275185541)(5.293050221161321,7.764419275185541),mkBezier (4.282618249080003,8.774851108917153)(4.282618249080003,9.332897245208862)(4.735004084869613,9.78528308099847)(5.293050221161321,9.78528308099847),mkBezier (5.293050221161321,9.78528308099847)(5.851096357453031,9.78528308099847)(6.3034821932426395,9.332897245208862)(6.3034821932426395,8.774851108917153),mkBezier (5.293050221161321,7.764419275185541)(5.851096357453031,7.764419275185541)(6.3034821932426395,8.216804972625443)(6.3034821932426395,8.774851108917153),mkBezier (5.986614600147038,2.477041530394307)(5.986614600147038,1.712957261642156)(6.606027271186491,1.093544452252995)(7.3701116782883505,1.093544452252995),mkBezier (5.986614600147038,2.477041530394307)(5.986614600147038,3.241125937496166)(6.606027271186491,3.8605386085356193)(7.3701116782883505,3.8605386085356193),mkBezier (6.789870375071436,2.6888791442566093)(6.789870375071436,2.0688856811437524)(7.292474387803418,1.5662816684117704)(7.912467850916275,1.5662816684117704),mkBezier (6.789870375071436,2.6888791442566093)(6.789870375071436,3.3088726073694663)(7.292474387803418,3.8114766201014487)(7.912467850916275,3.8114766201014487),mkBezier (7.128223124391741,0.32094724927962476)(7.128223124391741,-0.19279170133607)(7.54469088573806,-0.6092594626823897)(8.058429836353755,-0.6092594626823897),mkBezier (7.128223124391741,0.32094724927962476)(7.128223124391741,0.8346863382450272)(7.54469088573806,1.251154099591347)(8.058429836353755,1.251154099591347),mkBezier (7.3701116782883505,3.8605386085356193)(8.134195947040501,3.8605386085356193)(8.753608756429662,3.241125937496166)(8.753608756429662,2.477041530394307),mkBezier (7.3701116782883505,1.093544452252995)(8.134195947040501,1.093544452252995)(8.753608756429662,1.712957261642156)(8.753608756429662,2.477041530394307),mkBezier (7.912467850916275,3.8114766201014487)(8.532461314029131,3.8114766201014487)(9.035065188411407,3.3088726073694663)(9.035065188411407,2.6888791442566093),mkBezier (7.912467850916275,1.5662816684117704)(8.532461314029131,1.5662816684117704)(9.035065188411407,2.0688856811437524)(9.035065188411407,2.6888791442566093),mkBezier (8.058429836353755,1.251154099591347)(8.572168925319158,1.251154099591347)(8.988636686665478,0.8346863382450272)(8.988636686665478,0.32094724927962476),mkBezier (8.058429836353755,-0.6092594626823897)(8.572168925319158,-0.6092594626823897)(8.988636686665478,-0.19279170133607)(8.988636686665478,0.32094724927962476),mkBezier (9.002227746912014,6.856573334748986)(9.002227746912014,6.402849518935107)(9.370043726707832,6.035033539139289)(9.823767542521711,6.035033539139289),mkBezier (9.002227746912014,6.856573334748986)(9.002227746912014,7.310297288912573)(9.370043726707832,7.678113130358684)(9.823767542521711,7.678113130358684),mkBezier (9.823767542521711,7.678113130358684)(10.277491496685299,7.678113130358684)(10.645307338131408,7.310297288912573)(10.645307338131408,6.856573334748986),mkBezier (9.823767542521711,6.035033539139289)(10.277491496685299,6.035033539139289)(10.645307338131408,6.402849518935107)(10.645307338131408,6.856573334748986)]
