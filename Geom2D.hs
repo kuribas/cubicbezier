@@ -136,9 +136,12 @@ lineEquation (Line (Point x1 y1) (Point x2 y2)) =
 -- | Return the signed distance from a point to the line.  If the
 -- distance is negative, the point lies to the right of the line
 lineDistance :: Floating a => Line a -> Point a -> a
-lineDistance l = 
-  case lineEquation l of
-    (a, b, c) -> \(Point x y) -> a*x + b*y + c
+lineDistance (Line (Point x1 y1) (Point x2 y2)) =
+  let dy = y1 - y2
+      dx = x2 - x1
+      d = sqrt(dx*dx + dy*dy)
+  in dy `seq` dx `seq` d `seq`
+     \(Point x y) -> (x-x1)*dy/d + (y-y1)*dx/d
 {-# INLINE lineDistance #-}    
 
 -- | Return the point on the line closest to the given point.

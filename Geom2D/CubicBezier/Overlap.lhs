@@ -55,6 +55,8 @@ Let's begin with declaring the module and library imports:
 > import qualified Data.Set as S 
 > import Text.Printf
 > import Data.Ratio
+> import Data.Tuple
+> import Data.IORef
 > import Data.Maybe (isJust, isNothing, mapMaybe)
 
 #ifdef DEBUG
@@ -182,7 +184,7 @@ pointEvent (above), and the right set the elements greater (below):
 > singularC p = Curve (CubicBezier p p p p) trOne id Nothing
 >
 
-This handy function will be optimized away when DEBUG is false.
+Some functions for debugging:
 
 > showCurve (CubicBezier p0 p1 p2 p3) =
 >   showPt p0 ++ showPt p1 ++ showPt p2 ++ showPt p3
@@ -194,15 +196,21 @@ This handy function will be optimized away when DEBUG is false.
 > type SweepStateM = StateT SweepState IO
 >
 > traceMessage :: String -> SweepStateM ()
-> traceMessage = liftIO . hPutStrLn stderr
-> 
+> traceMessage msg = liftIO $ hPutStrLn stderr msg
+>
 > assert :: Bool -> String -> SweepStateM ()
-> assert p msg = unless p $ do
->   liftIO $ hPutStrLn stderr $ "ASSERT " ++ msg
+> assert p msg = unless p $ liftIO $ hPutStrLn stderr $ "ASSERT " ++ msg
+>
+> assertTrace p msg e
+>   | p = e
+>   | otherwise = trace ("ASSERT " ++ msg) e
 >
 #else
+> -- | output a trace of the algorithm when compiled with @-fdebug@.
 > type SweepStateM  = State SweepState
 >
+> assertTrace _ _ e  = e
+> 
 > traceMessage _ = return ()
 >
 > assert :: Bool -> String -> SweepStateM ()
@@ -858,9 +866,11 @@ of overlap is the same in both curves.
 >               (Maybe (Curve, Curve),
 >                Maybe (Curve, Curve))
 > splitMaybe c1 c2 tol =
+>   assertTrace (null errMsg) errMsg
 >   (adjustSplit c1 <$> fst n,
 >    adjustSplit c2 <$> snd n)
 >   where
+>     errMsg = checkSplitCurve b1 b2 n
 >     n = nextIntersection b1 b2 tol $
 >         bezierIntersection b1 b2 pTol
 >     pTol = min (bezierParamTolerance b1 tol)
@@ -868,10 +878,57 @@ of overlap is the same in both curves.
 >     b1 = view bezier c1
 >     b2 = view bezier c2
 >
+> checkOverlap c1 c2 =
+>   any (/=p) ps
+>   where x0 = pointX $ cubicC0 c2
+>         x3 = pointX $ cubicC3 c2
+>         t0 | pointX (cubicC0 c1) >= pointX (cubicC0 c2) = 0
+>            | otherwise = findX c1 (pointX (cubicC0 c2)) 1e-7
+>         t1 | pointX (cubicC3 c1) <= pointX (cubicC3 c2) = 1
+>            | otherwise = findX c1 (pointX (cubicC3 c2)) 1e-7
+>         comp t = let (Point bx by) = evalBezier c1 (t0 + (t1-t0)*t/10)
+>                  in compare (pointY (evalBezier c2 (findX c2 bx 1e-7))) by
+>         (p:ps) = map comp [1..9]
+> 
+> checkDirection :: CubicBezier Double -> CubicBezier Double -> CubicBezier Double -> String
+> checkDirection c1 c2 c@(CubicBezier p1 _ _ p2)
+>   | PointEvent p1 < PointEvent p2 = ""
+>   | otherwise = "Curve has wrong direction: " ++ showCurve c ++
+>       "after splitting " ++ showCurve c1 ++ " " ++ showCurve c2
+>   
+> checkSplitCurve :: CubicBezier Double -> CubicBezier Double ->
+>                    (Maybe (CubicBezier Double, CubicBezier Double),
+>                      Maybe (CubicBezier Double, CubicBezier Double)) -> String
+> checkSplitCurve c1 c2 (Nothing, Nothing) =
+>   if checkOverlap c1 c2
+>   then "Curves overlap: " ++ showCurve c1 ++ " " ++ showCurve c2
+>   else ""
+>
+> checkSplitCurve c1 c2 (Just (c3, c4), Just (c5, c6)) =
+>   checkDirection c1 c2 c3 ++ checkDirection c1 c2 c4 ++
+>   checkDirection c1 c2 c5 ++ checkDirection c1 c2 c6
+>
+> 
+> checkSplitCurve c1 c2 (Just (c3, c4), Nothing) =
+>   checkDirection c1 c2 c3 ++ checkDirection c1 c2 c4 ++
+>   (if cubicC3 c2 == cubicC3 c3 then "" else
+>    "second curve doesn't split first curve: " ++ showCurve c1 ++ " " ++ showCurve c2)
+>
+> checkSplitCurve c1 c2 (Nothing, Just (c3, c4)) =
+>   checkDirection c1 c2 c3 ++ checkDirection c1 c2 c4 ++
+>   (if cubicC3 c1 == cubicC3 c3 then "" else
+>    "first curve doesn't split second curve: " ++ showCurve c1 ++ " " ++ showCurve c2)
+>
 > adjustSplit :: Curve -> (CubicBezier Double, CubicBezier Double) -> (Curve, Curve)
-> adjustSplit curve (b1, b2) =
->   (set curveRank Nothing $ set bezier b1 curve,
->    set curveRank Nothing $ set bezier b2 curve)
+> adjustSplit curve (b1, b2) = (adjust1 b1, adjust1 b2)
+>   where
+>     adjust1 b = (if PointEvent (cubicC0 b) > PointEvent (cubicC3 b)
+>                 then revertCurve else id) $
+>                set curveRank Nothing $ set bezier b curve
+>
+> revertCurve :: Curve -> Curve
+> revertCurve (Curve bez tr chtr rank) =
+>   Curve (reorient bez) (swap tr) (swap . chtr . swap) rank
 >
 > adjust :: Curve -> CubicBezier Double -> Curve
 > adjust curve curve2 = set curveRank Nothing $ set bezier curve2 curve
@@ -896,25 +953,34 @@ intersections that necessary.
 >   | bezierEqual b1l b2l tol =
 >       nextIntersection b1 b2 tol ts
 >   | otherwise =
+>       assertTrace (vectorDistance x1 x2 < tol)
+>       ("ASSERT: DISTANCE IS LARGER THAN TOLERANCE: " ++ show t1 ++ " " ++ show t2 ++ " " ++ showCurve b1 ++ " " ++ showCurve b2)
 >       (bs1, bs2)
 >   where
->     bs1 | atStart1 || atEnd1 = Nothing
->         | otherwise = Just (adjustC3 pMid $ snapRoundBezier tol b1l,
->                             adjustC0 pMid $ snapRoundBezier tol b1r)
+>     bs1 | atStart1 || atEnd1 = Nothing 
+>         | otherwise = Just (adjustC3 pMid2 $ snapRoundBezier tol b1l,
+>                             adjustC0 pMid2 $ snapRoundBezier tol b1r)
 >     bs2 | atStart2 || atEnd2 = Nothing
->         | otherwise = Just (adjustC3 pMid $ snapRoundBezier tol b2l,
->                             adjustC0 pMid $ snapRoundBezier tol b2r)
+>         | otherwise = Just (adjustC3 pMid2 $ snapRoundBezier tol b2l,
+>                             adjustC0 pMid2 $ snapRoundBezier tol b2r)
 >     pMid | atStart1 = cubicC0 b1
 >          | atEnd1 = cubicC3 b1
 >          | atStart2 = cubicC0 b2
->          | atEnd1 = cubicC3 b2
+>          | atEnd2 = cubicC3 b2
 >          | otherwise = snapRound tol <$> cubicC3 b1l
+
+The intersection point can be in the past (if the curve is nearly vertical), so if that happens move the intersection point a tiny bit aside.  We may need to reorient the subcurve after the intersection point as well (see adjustSplit).
+
+>     pMid2 | PointEvent pMid <= PointEvent (cubicC0 b1) ||
+>             PointEvent pMid <= PointEvent (cubicC0 b2) =
+>             Point (max (pointX x1) (pointX x2) + tol) (pointY pMid)
+>           | otherwise = pMid
 >     x1 = evalBezier b1 t1
 >     x2 = evalBezier b2 t2
->     atStart1 = vectorDistance (cubicC0 b1) x1 < tol
->     atStart2 = vectorDistance (cubicC0 b2) x2 < tol
->     atEnd1 = vectorDistance (cubicC3 b1) x1 < tol
->     atEnd2 = vectorDistance (cubicC3 b2) x2 < tol
+>     atStart1 = vectorDistance (cubicC0 b1) x1 < 3*tol
+>     atStart2 = vectorDistance (cubicC0 b2) x2 < 3*tol
+>     atEnd1 = vectorDistance (cubicC3 b1) x1 < 3*tol
+>     atEnd2 = vectorDistance (cubicC3 b2) x2 < 3*tol
 >     (b1l, b1r) = splitBezier b1 t1
 >     (b2l, b2r) = splitBezier b2 t2
 > 
@@ -1134,4 +1200,4 @@ handy for debugging:
 
 >
 > -- mkBezier (a, b) (c, d) (e, f) (g, h) = CubicBezier (Point a b) (Point c d) (Point e f) (Point g h)
-> --x = [mkBezier (1.7945835892524933,2.0547397002191734)(1.7945835892524933,1.4415012999400492)(2.2917115821994845,0.9443733069930581)(2.9049499824786085,0.9443733069930581),mkBezier (1.7945835892524933,2.0547397002191734)(1.7945835892524933,2.667978238848005)(2.2917115821994845,3.1651062317949963)(2.9049499824786085,3.1651062317949963),mkBezier (2.110720695890836,7.885290987712098)(2.110720695890836,7.516067576338687)(2.410035446506936,7.216752964072295)(2.7792588578803468,7.216752964072295),mkBezier (2.110720695890836,7.885290987712098)(2.110720695890836,8.25451439908551)(2.410035446506936,8.553829149701608)(2.7792588578803468,8.553829149701608),mkBezier (2.7323502826483033,3.689897110469715)(2.7323502826483033,3.1926138891505564)(3.1354780884677687,2.789486083331091)(3.632761309786927,2.789486083331091),mkBezier (2.7323502826483033,3.689897110469715)(2.7323502826483033,4.187180470138581)(3.1354780884677687,4.590308275958047)(3.632761309786927,4.590308275958047),mkBezier (2.7792588578803468,8.553829149701608)(3.148482269253758,8.553829149701608)(3.4477968815201496,8.25451439908551)(3.4477968815201496,7.885290987712098),mkBezier (2.7792588578803468,7.216752964072295)(3.148482269253758,7.216752964072295)(3.4477968815201496,7.516067576338687)(3.4477968815201496,7.885290987712098),mkBezier (2.9049499824786085,3.1651062317949963)(3.5181885211074406,3.1651062317949963)(4.015316514054431,2.667978238848005)(4.015316514054431,2.0547397002191734),mkBezier (2.9049499824786085,0.9443733069930581)(3.5181885211074406,0.9443733069930581)(4.015316514054431,1.4415012999400492)(4.015316514054431,2.0547397002191734),mkBezier (3.632761309786927,4.590308275958047)(4.130044669455794,4.590308275958047)(4.533172336925551,4.187180470138581)(4.533172336925551,3.689897110469715),mkBezier (3.632761309786927,2.789486083331091)(4.130044669455794,2.789486083331091)(4.533172336925551,3.1926138891505564)(4.533172336925551,3.689897110469715),mkBezier (4.282618249080003,8.774851108917153)(4.282618249080003,8.216804972625443)(4.735004084869613,7.764419275185541)(5.293050221161321,7.764419275185541),mkBezier (4.282618249080003,8.774851108917153)(4.282618249080003,9.332897245208862)(4.735004084869613,9.78528308099847)(5.293050221161321,9.78528308099847),mkBezier (5.293050221161321,9.78528308099847)(5.851096357453031,9.78528308099847)(6.3034821932426395,9.332897245208862)(6.3034821932426395,8.774851108917153),mkBezier (5.293050221161321,7.764419275185541)(5.851096357453031,7.764419275185541)(6.3034821932426395,8.216804972625443)(6.3034821932426395,8.774851108917153),mkBezier (5.986614600147038,2.477041530394307)(5.986614600147038,1.712957261642156)(6.606027271186491,1.093544452252995)(7.3701116782883505,1.093544452252995),mkBezier (5.986614600147038,2.477041530394307)(5.986614600147038,3.241125937496166)(6.606027271186491,3.8605386085356193)(7.3701116782883505,3.8605386085356193),mkBezier (6.789870375071436,2.6888791442566093)(6.789870375071436,2.0688856811437524)(7.292474387803418,1.5662816684117704)(7.912467850916275,1.5662816684117704),mkBezier (6.789870375071436,2.6888791442566093)(6.789870375071436,3.3088726073694663)(7.292474387803418,3.8114766201014487)(7.912467850916275,3.8114766201014487),mkBezier (7.128223124391741,0.32094724927962476)(7.128223124391741,-0.19279170133607)(7.54469088573806,-0.6092594626823897)(8.058429836353755,-0.6092594626823897),mkBezier (7.128223124391741,0.32094724927962476)(7.128223124391741,0.8346863382450272)(7.54469088573806,1.251154099591347)(8.058429836353755,1.251154099591347),mkBezier (7.3701116782883505,3.8605386085356193)(8.134195947040501,3.8605386085356193)(8.753608756429662,3.241125937496166)(8.753608756429662,2.477041530394307),mkBezier (7.3701116782883505,1.093544452252995)(8.134195947040501,1.093544452252995)(8.753608756429662,1.712957261642156)(8.753608756429662,2.477041530394307),mkBezier (7.912467850916275,3.8114766201014487)(8.532461314029131,3.8114766201014487)(9.035065188411407,3.3088726073694663)(9.035065188411407,2.6888791442566093),mkBezier (7.912467850916275,1.5662816684117704)(8.532461314029131,1.5662816684117704)(9.035065188411407,2.0688856811437524)(9.035065188411407,2.6888791442566093),mkBezier (8.058429836353755,1.251154099591347)(8.572168925319158,1.251154099591347)(8.988636686665478,0.8346863382450272)(8.988636686665478,0.32094724927962476),mkBezier (8.058429836353755,-0.6092594626823897)(8.572168925319158,-0.6092594626823897)(8.988636686665478,-0.19279170133607)(8.988636686665478,0.32094724927962476),mkBezier (9.002227746912014,6.856573334748986)(9.002227746912014,6.402849518935107)(9.370043726707832,6.035033539139289)(9.823767542521711,6.035033539139289),mkBezier (9.002227746912014,6.856573334748986)(9.002227746912014,7.310297288912573)(9.370043726707832,7.678113130358684)(9.823767542521711,7.678113130358684),mkBezier (9.823767542521711,7.678113130358684)(10.277491496685299,7.678113130358684)(10.645307338131408,7.310297288912573)(10.645307338131408,6.856573334748986),mkBezier (9.823767542521711,6.035033539139289)(10.277491496685299,6.035033539139289)(10.645307338131408,6.402849518935107)(10.645307338131408,6.856573334748986)]
+> --x = 

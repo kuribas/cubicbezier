@@ -82,11 +82,14 @@
 	 d="M137 8 L137 15 L129 15 L129 20 L137 20 L137 28 L142 28 L142 20
 	    L149 20 L149 15 L142 15 L142 8 L137 8 Z"
 	 id="faster"
+	 onclick="fastforward();"
 	 />
      <path
 	 class="button"
 	 d="M164 15 L164 20 L181 20 L181 15 L164 15 Z"
-	 id="slower" />
+	 id="slower"
+	 onclick="fastbackward();"
+/>
      <text x="200" y="20" id="msg" width="${width-200}"
 	   font-size="15"></text>
      
@@ -102,6 +105,17 @@ var steps =
 
 var currentStep = 0;
 var msg = document.getElementById("msg");
+
+function fastforward () {
+  for(var i = 0; i < 20; i++)
+     nextStep();
+}
+
+function fastbackward () {
+  for(var i = 0; i < 20; i++)
+     prevStep();
+}
+
 
 function nextStep () {
    if (currentStep >= steps.length - 1)

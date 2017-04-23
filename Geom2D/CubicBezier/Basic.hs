@@ -554,20 +554,22 @@ evalBezierDerivs2Cubic (CubicBezier a b c d) t =
 -- dividing the approximate arclength on the osculating circle at t by the
 -- speed at t.
 closestBezierCurve :: CubicBezier Double -> DPoint -> Double -> Double
-closestBezierCurve cb p t
- | vectorMagSquare (p ^-^ b) < v*v*r_v*r_v*10 =
-   closestLinePt b b' p
+closestBezierCurve cb p@(Point px py) t
+ | vSqr == 0 =
+     let (Point dx dy) = cubicC3 cb ^-^ cubicC0 cb
+     in signum ((px - bx)*dx + (py - by)*dy)
+ | vectorMagSquare (p ^-^ b) * 100 < vSqr*r_v*r_v =
+     closestLinePt 
  | otherwise =
    -- circular arc divided by velocity
-   (fastVectorAngle (rotateScaleVec (flipVector (p ^-^ c)) $* (Point (-by') bx'))) * r_v
+   - (fastVectorAngle (rotateScaleVec (c ^-^ p) $* ((Point by' bx') ^* signum r_v))) * r_v
   where
-    closestLinePt :: DPoint -> DPoint -> DPoint -> Double
-    closestLinePt (Point bx by) (Point bx' by') (Point px py) =
-      ((px - bx)*bx' + (py - by)*by')/v
-    (b, b'@(Point bx' by'), Point bx'' by'') = evalBezierDerivs2Cubic cb t
+    closestLinePt :: Double
+    closestLinePt = ((px - bx)*bx' + (py - by)*by')/vSqr
+    (b@(Point bx by), b'@(Point bx' by'), Point bx'' by'') = evalBezierDerivs2Cubic cb t
     -- radius of curvature / velocity
-    r_v = v/denom
-    v = bx'*bx' + by'*by'
+    r_v = vSqr/denom
+    vSqr = bx'*bx' + by'*by'
     denom = bx''*by' - bx'*by''
     -- center of osculating circle
     c = b ^+^ ((rotate90R $* b') ^* r_v)
@@ -583,7 +585,8 @@ fastVectorAngle (Point x y)
 -- | Find the closest value on the bezier to the given point, within tolerance.  Return the first value found.
 closest :: CubicBezier Double -> DPoint -> Double -> Double
 closest cb p eps =
-  iter (closestBezierCurve cb p) eps 0 1 0.5
+  iter (closestBezierCurve cb p) (bezierParamTolerance cb eps) 0 1 0.5
+  
 
 -- iterate, fallback to bisection if the approximation doesn't converge.  
 iter :: (Double -> Double) -> Double -> Double -> Double -> Double -> Double  

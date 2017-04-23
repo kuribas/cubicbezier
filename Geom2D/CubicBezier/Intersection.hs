@@ -89,18 +89,21 @@ chopHull !dmin !dmax ds = do
   Just (left_t, right_t)
 
 bezierClip :: CubicBezier Double -> CubicBezier Double -> Double -> Double
-           -> Double -> Double -> Double -> Double -> Bool
+           -> Double -> Double -> Double -> Double -> Double -> Bool
            -> [(Double, Double)]
 bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
-  tmin tmax umin umax prevClip eps revCurves = either id id $ do
+  tmin tmax umin umax prevClip pEps vEps revCurves = either id id $ do
   q3' <- if | vectorDistance q0 q3 > max (vectorMag q0) (vectorMag q3) / (2**30) -> Right q3
             | vectorDistance q0 q1 > max (vectorMag q0) (vectorMag q1) / (2**30) -> Right q1
             | vectorDistance q0 q2 > max (vectorMag q0) (vectorMag q2) / (2**30) -> Right q2
             | otherwise -> Left $
-              let t = closest p q0 eps
+              let t = closest p q0 vEps
                   newT = tmin * (1-t) + tmax * t
                   umid = umin + (umax-umin)/2
-              in if revCurves then [(umid, newT)] else [(newT, umid)]
+              in if | vectorDistance (evalBezier p t) (evalBezier q 0.5) > vEps
+                      -> []
+                    | revCurves -> [(umid, newT)]
+                    | otherwise -> [(newT, umid)]
   let d = lineDistance (Line q0 q3')
       d1 = d q1
       d2 = d q2
@@ -116,48 +119,47 @@ bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
       new_tmin = tmax * chop_tmin + tmin * (1 - chop_tmin)
       new_tmax = tmax * chop_tmax + tmin * (1 - chop_tmax)
   if | -- within tolerance      
-       max (umax - umin) (new_tmax - new_tmin) < eps ->
-       if revCurves
-       then Right [ (umin + (umax-umin)/2,
-                     new_tmin + (new_tmax-new_tmin)/2) ]
-       else Right [ (new_tmin + (new_tmax-new_tmin)/2,
-               umin + (umax-umin)/2)]
+       max (umax - umin) (new_tmax - new_tmin) < pEps ->
+       let newu | umax == 1 = 1
+                | umin == 0 = 0
+                | otherwise = umin + (umax-umin)/2
+           newt | tmax == 1 = 1
+                | tmin == 0 = 0
+                | otherwise = new_tmin + (new_tmax-new_tmin)/2
+       in if revCurves
+       then Right [(newu, newt)]
+       else Right [(newt, newu)]
            -- not enough reduction, so split the curve in case we have
            -- multiple intersections
      | prevClip > 0.8 && newClip > 0.8 ->
-             if | abs (dmax - dmin) < eps * vectorDistance p0 p3 ->
-                -- fat line is smaller than tolerance.
-                  if revCurves
-                  then Right [(umin, new_tmin), (umax, new_tmax)]
-                  else Right [(new_tmin, umin), (new_tmax, umax)]
-                | new_tmax - new_tmin > umax - umin ->
+             if | new_tmax - new_tmin > umax - umin ->
                     -- split the longest segment
                   let (pl, pr) = splitBezier newP 0.5
                       half_t = new_tmin + (new_tmax - new_tmin) / 2
                   in Right $ bezierClip q pl umin umax new_tmin half_t
-                     newClip eps (not revCurves) ++
+                     newClip pEps vEps (not revCurves) ++
                      bezierClip q pr umin umax half_t new_tmax
-                     newClip eps (not revCurves)
+                     newClip pEps vEps (not revCurves)
                 | otherwise ->
                     let (ql, qr) = splitBezier q 0.5
                         half_t = umin + (umax - umin) / 2
                     in Right $ bezierClip ql newP umin half_t
-                       new_tmin new_tmax newClip eps (not revCurves) ++
+                       new_tmin new_tmax newClip pEps vEps (not revCurves) ++
                        bezierClip qr newP half_t umax new_tmin new_tmax
-                       newClip eps (not revCurves)
+                       newClip pEps vEps (not revCurves)
       -- iterate with the curves swapped.
      | otherwise ->
         Right $ bezierClip q newP umin umax new_tmin
-        new_tmax newClip eps (not revCurves)
+        new_tmax newClip pEps vEps (not revCurves)
 
-maxEps :: Double
-maxEps = 1e-8
+minEps :: Double
+minEps = 1e-8
 
 -- | Find the intersections between two Bezier curves, using the
 -- Bezier Clip algorithm. Returns the parameters for both curves.
 bezierIntersection :: CubicBezier Double -> CubicBezier Double -> Double -> [(Double, Double)]
-bezierIntersection p q eps = bezierClip p q 0 1 0 1 0 eps2 False
-  where eps2 = max eps maxEps
+bezierIntersection p q vEps = bezierClip p q 0 1 0 1 0 eps2 vEps False
+  where eps2 = max (min (bezierParamTolerance p vEps) (bezierParamTolerance q vEps)) minEps
 
 -- TODO:
 -- following curve generate very large list of intersections
