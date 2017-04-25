@@ -872,9 +872,7 @@ of overlap is the same in both curves.
 >   where
 >     errMsg = checkSplitCurve b1 b2 n
 >     n = nextIntersection b1 b2 tol $
->         bezierIntersection b1 b2 pTol
->     pTol = min (bezierParamTolerance b1 tol)
->            (bezierParamTolerance b2 tol)
+>         bezierIntersection b1 b2 tol
 >     b1 = view bezier c1
 >     b2 = view bezier c2
 >
@@ -882,10 +880,10 @@ of overlap is the same in both curves.
 >   any (/=p) ps
 >   where x0 = pointX $ cubicC0 c2
 >         x3 = pointX $ cubicC3 c2
->         t0 | pointX (cubicC0 c1) >= pointX (cubicC0 c2) = 0
->            | otherwise = findX c1 (pointX (cubicC0 c2)) 1e-7
->         t1 | pointX (cubicC3 c1) <= pointX (cubicC3 c2) = 1
->            | otherwise = findX c1 (pointX (cubicC3 c2)) 1e-7
+>         t0 | pointX (cubicC0 c1) >= x0 = 0
+>            | otherwise = findX c1 x0 1e-7
+>         t1 | pointX (cubicC3 c1) <= x3 = 1
+>            | otherwise = findX c1 x3 1e-7
 >         comp t = let (Point bx by) = evalBezier c1 (t0 + (t1-t0)*t/10)
 >                  in compare (pointY (evalBezier c2 (findX c2 bx 1e-7))) by
 >         (p:ps) = map comp [1..9]
@@ -898,7 +896,7 @@ of overlap is the same in both curves.
 >   
 > checkSplitCurve :: CubicBezier Double -> CubicBezier Double ->
 >                    (Maybe (CubicBezier Double, CubicBezier Double),
->                      Maybe (CubicBezier Double, CubicBezier Double)) -> String
+>                     Maybe (CubicBezier Double, CubicBezier Double)) -> String
 > checkSplitCurve c1 c2 (Nothing, Nothing) =
 >   if checkOverlap c1 c2
 >   then "Curves overlap: " ++ showCurve c1 ++ " " ++ showCurve c2
@@ -977,10 +975,10 @@ The intersection point can be in the past (if the curve is nearly vertical), so 
 >           | otherwise = pMid
 >     x1 = evalBezier b1 t1
 >     x2 = evalBezier b2 t2
->     atStart1 = vectorDistance (cubicC0 b1) x1 < 3*tol
->     atStart2 = vectorDistance (cubicC0 b2) x2 < 3*tol
->     atEnd1 = vectorDistance (cubicC3 b1) x1 < 3*tol
->     atEnd2 = vectorDistance (cubicC3 b2) x2 < 3*tol
+>     atStart1 = vectorDistance (cubicC0 b1) x1 < tol
+>     atStart2 = vectorDistance (cubicC0 b2) x2 < tol
+>     atEnd1 = vectorDistance (cubicC3 b1) x1 < tol
+>     atEnd2 = vectorDistance (cubicC3 b2) x2 < tol
 >     (b1l, b1r) = splitBezier b1 t1
 >     (b2l, b2r) = splitBezier b2 t2
 > 

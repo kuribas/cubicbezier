@@ -99,7 +99,8 @@ bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
             | otherwise -> Left $
               let t = closest p q0 vEps
                   newT = tmin * (1-t) + tmax * t
-                  umid = umin + (umax-umin)/2
+                  umid | umax >= 0.5 = umax
+                       | otherwise = umin
               in if | vectorDistance (evalBezier p t) (evalBezier q 0.5) > vEps
                       -> []
                     | revCurves -> [(umid, newT)]
@@ -119,33 +120,32 @@ bezierClip p@(CubicBezier !p0 !p1 !p2 !p3) q@(CubicBezier !q0 !q1 !q2 !q3)
       new_tmin = tmax * chop_tmin + tmin * (1 - chop_tmin)
       new_tmax = tmax * chop_tmax + tmin * (1 - chop_tmax)
   if | -- within tolerance      
-       max (umax - umin) (new_tmax - new_tmin) < pEps ->
-       let newu | umax == 1 = 1
-                | umin == 0 = 0
-                | otherwise = umin + (umax-umin)/2
-           newt | tmax == 1 = 1
-                | tmin == 0 = 0
-                | otherwise = new_tmin + (new_tmax-new_tmin)/2
+       (max (umax - umin) (new_tmax - new_tmin))*4 < pEps ->
+       let newu | umax >= 0.5 = umax
+                | otherwise = umin
+           newt | new_tmax >= 0.5 = new_tmax
+                | otherwise = new_tmin
        in if revCurves
        then Right [(newu, newt)]
        else Right [(newt, newu)]
            -- not enough reduction, so split the curve in case we have
            -- multiple intersections
      | prevClip > 0.8 && newClip > 0.8 ->
-             if | new_tmax - new_tmin > umax - umin ->
+             if | (new_tmax-new_tmin) * (new_tmax-new_tmin) * vectorMagSquare (p3 ^-^ p0) >
+                  (umax-umin) * (umax-umin) * vectorMagSquare (q3 ^-^ q0) ->
                     -- split the longest segment
                   let (pl, pr) = splitBezier newP 0.5
                       half_t = new_tmin + (new_tmax - new_tmin) / 2
                   in Right $ bezierClip q pl umin umax new_tmin half_t
-                     newClip pEps vEps (not revCurves) ++
+                     0 pEps vEps (not revCurves) ++
                      bezierClip q pr umin umax half_t new_tmax
-                     newClip pEps vEps (not revCurves)
+                     0 pEps vEps (not revCurves)
                 | otherwise ->
                     let (ql, qr) = splitBezier q 0.5
-                        half_t = umin + (umax - umin) / 2
-                    in Right $ bezierClip ql newP umin half_t
+                        half_u = umin + (umax - umin) / 2
+                    in Right $ bezierClip ql newP umin half_u
                        new_tmin new_tmax newClip pEps vEps (not revCurves) ++
-                       bezierClip qr newP half_t umax new_tmin new_tmax
+                       bezierClip qr newP half_u umax new_tmin new_tmax
                        newClip pEps vEps (not revCurves)
       -- iterate with the curves swapped.
      | otherwise ->
