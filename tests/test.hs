@@ -37,7 +37,7 @@ nodeP = option Open specialNode
           spaces; char '}'
           return node
 
-tensionAmount :: Parser Tension
+tensionAmount :: Parser (Tension Double)
 tensionAmount = do
   cons <- option Tension
           (string "atleast" >>
@@ -46,7 +46,7 @@ tensionAmount = do
   n <- num
   return $ cons n
          
-tensionP :: Parser (Tension, Tension)
+tensionP :: Parser (Tension Double, Tension Double)
 tensionP =
   option (Tension 1, Tension 1) $
   do string "tension";
