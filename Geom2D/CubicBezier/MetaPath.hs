@@ -67,8 +67,10 @@ import qualified Data.Vector.Unboxed as V
 import Geom2D.CubicBezier.Numeric
 
 data OpenMetaPath a = OpenMetaPath [(Point a, MetaJoin a)] (Point a)
-  deriving (Functor, Traversable, Foldable)
-                      -- ^ A metapath with endpoints
+                        -- ^ A metapath with endpoints
+                    deriving (Functor, Traversable, Foldable)
+
+
 data ClosedMetaPath a = ClosedMetaPath [(Point a, MetaJoin a)]
                         -- ^ A metapath with cycles.  The last join
                         -- joins the last point with the first.
