@@ -331,9 +331,9 @@ lsqSolveDist (SparseMatrix r s m') v
 -- | solve a tridiagonal system.  see metafont the program: ¶ 283
 solveTriDiagonal :: (Unbox a, Fractional a) =>
                     (a, a, a) -> V.Vector (a, a, a, a) -> V.Vector a
-solveTriDiagonal (!b0, !c0, !d0) rows = solutions
+solveTriDiagonal (!b0, !c0, !d0) rows_ = solutions
   where
-    twovars = V.scanl nextrow (c0/b0, d0/b0) rows
+    twovars = V.scanl nextrow (c0/b0, d0/b0) rows_
     solutions = V.scanr nextsol vn (V.unsafeInit twovars)
     vn = snd $ V.unsafeLast twovars
     nextsol (u, v) ti = v - u*ti
@@ -343,9 +343,9 @@ solveTriDiagonal (!b0, !c0, !d0) rows = solutions
 
 -- | solve a cyclic tridiagonal system.  see metafont the program: ¶ 286
 solveCyclicTriD :: (Unbox a, Fractional a) => V.Vector (a, a, a, a) -> V.Vector a
-solveCyclicTriD rows = solutions
+solveCyclicTriD rows_ = solutions
   where
-    threevars = V.tail $ V.scanl nextrow (0, 0, 1) rows
+    threevars = V.tail $ V.scanl nextrow (0, 0, 1) rows_
     nextrow (!u, !v, !w) (!ai, !bi, !ci, !di) =
       (ci/(bi - ai*u), (di - ai*v)/(bi - ai*u), -ai*w/(bi - ai*u))
     (totvn, totwn) = V.foldr (\(u, v, w) (v', w') ->

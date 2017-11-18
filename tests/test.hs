@@ -80,7 +80,7 @@ closedMetaRest p = do
   return $ ClosedMetaPath ((p, MetaJoin leftNode tl
                              tr rightNode):joins)
 
-openRest :: DPoint -> Parser (OpenPath Double)
+openRest :: DPoint -> Parser (Path Open Double)
 openRest p = do
   string ".."; spaces
   string "controls"; spaces
@@ -88,34 +88,45 @@ openRest p = do
   string "and"; spaces
   p2 <- pointP; spaces
   string ".."; spaces
-  OpenPath joins q <- openP
-  return $ OpenPath ((p, JoinCurve p1 p2):joins) q
-
-closedRest :: DPoint -> Parser (ClosedPath Double)
-closedRest p = do
+  Path joins <- openP
+  return $ case joins of
+    (LineTo a:r)  -> 
+      Path (LineTo p:(CurveTo p1 p2 a):r)
+    _ -> error "illegal path"
+    
+closedRest :: DPoint -> DPoint -> Parser (Path Closed Double)
+closedRest p q = do
   string ".."; spaces
   string "controls"; spaces
   p1 <- pointP; spaces
   string "and"; spaces
   p2 <- pointP; spaces
   string ".."; spaces
-  ClosedPath joins <- closedP
-  return $ ClosedPath ((p, JoinCurve p1 p2):joins)
+  Path joins <- closedP2 q
+  return $ case joins of
+    (LineTo a:r)  -> 
+      Path (LineTo p:(CurveTo p1 p2 a):r)
+    _ -> error "illegal path"
 
-openP :: Parser (OpenPath Double)
+openP :: Parser (Path Open Double)
 openP = 
   do p <- pointP
      spaces
-     option (OpenPath [] p) (openRest p)
+     option (Path [LineTo p]) (openRest p)
 
-closedP :: Parser (ClosedPath Double)
 closedP =
   do p <- pointP
      spaces
-     closedRest p
+     closedRest p p
+
+closedP2 :: DPoint -> Parser (Path Closed Double)
+closedP2 q =
+  do p <- pointP
+     spaces
+     closedRest p q
   <|> do
     string "cycle"
-    return (ClosedPath [])
+    return (Path [LineTo q])
 
 openMetaP :: Parser (OpenMetaPath Double)
 openMetaP =
@@ -149,26 +160,19 @@ pointEq (Point a b) (Point c d) =
   doubleEq a c && doubleEq b d
 
 joinEq :: PathJoin Double -> PathJoin Double -> Bool
-joinEq JoinLine JoinLine  = True
-joinEq (JoinCurve a b) (JoinCurve c d) =
-  pointEq a c && pointEq b d
+joinEq (LineTo a) (LineTo b)  = pointEq a b
+joinEq (CurveTo a b c) (CurveTo d e f) =
+  pointEq a d && pointEq b e && pointEq c f
 joinEq _ _ = True
 
-openPathEq (OpenPath joins p) (OpenPath joins2 q) =
-  pointEq p q && length joins == length joins2 &&
-  and (zipWith
-   (\(p1, j1) (p2, j2) ->
-     pointEq p1 p2 && joinEq j1 j2)
-   joins joins2)
+pathEq :: Path a Double -> Path a Double -> Bool
+pathEq (Path joins) (Path joins2) =
+  length joins == length joins2 &&
+  and (zipWith joinEq joins joins2)
 
-closedPathEq (ClosedPath joins) (ClosedPath joins2) =
-  and (zipWith
-   (\(p1, j1) (p2, j2) ->
-     pointEq p1 p2 && joinEq j1 j2)
-   joins joins2)
-
-openThetas :: OpenPath Double -> [Double]
-openThetas (OpenPath j p) =
+{-
+openThetas :: Path Open Double -> [Double]
+openThetas (Path j) =
   zipWith3 theta
   (map fst j)
   (tail (map fst j) ++ [p])
@@ -195,18 +199,19 @@ openPhis (OpenPath j p) =
 closedPhis (ClosedPath j) =
   openPhis (OpenPath j (fst $ head j))
 
+-}
 testOpen :: TestName -> String -> TestTree
 testOpen p1 p2 =
   testCase p1 $ 
   assertBool "Incorrect metapath." $
-  unmetaOpen (tryParse openMetaP p1) `openPathEq`
+  unmetaOpen (tryParse openMetaP p1) `pathEq`
   tryParse openP p2
 
 testClosed :: TestName -> String -> TestTree
 testClosed p1 p2 =
   testCase p1 $ 
   assertBool "Incorrect metapath." $
-  unmetaClosed (tryParse closedMetaP p1) `closedPathEq`
+  unmetaClosed (tryParse closedMetaP p1) `pathEq`
   tryParse closedP p2
 
 -- These tests were created by running mf, typing expr after the

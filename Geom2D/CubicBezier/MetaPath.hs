@@ -61,9 +61,10 @@ module Geom2D.CubicBezier.MetaPath
 where
 import Geom2D
 import Geom2D.CubicBezier.Basic
-import Data.List
 import Text.Printf
+import Data.Monoid
 import qualified Data.Vector.Unboxed as V
+import qualified Data.Vector as BV
 import Geom2D.CubicBezier.Numeric
 
 data OpenMetaPath a = OpenMetaPath [(Point a, MetaJoin a)] (Point a)
@@ -147,24 +148,46 @@ showPath = concatMap showNodes
     typename Open = ""
     typename (Curl g) = printf "{curl %.3f}" (realToFrac g :: Double) :: String
     typename (Direction dir) = printf "{%s}" (showPoint dir) :: String
-    
+
+zipWithNext :: (V.Unbox a, V.Unbox b) => (a -> a -> b) -> V.Vector a -> V.Vector a -> V.Vector b
+zipWithNext f v1 v2 = V.generate (V.length v1) val
+  where val i | i < V.length v1-1 = f (v1 V.! i) (v2 V.! (i+1))
+              | otherwise = f (v1 V.! i) (v2 V.! 0)
+
+zipWithNext4 :: V.Unbox b => (Double -> Double -> Double -> Double ->
+                 Double -> Double -> Double -> Double -> b)
+             -> V.Vector Double -> V.Vector Double
+             -> V.Vector Double -> V.Vector Double
+             -> V.Vector b
+zipWithNext4 f v1 v2 v3 v4 = V.generate (V.length v1) val
+  where val i | i < V.length v1-1 =
+                  f (v1 V.! i) (v1 V.! (i+1))
+                  (v2 V.! i) (v2 V.! (i+1))
+                  (v3 V.! i) (v3 V.! (i+1))
+                  (v4 V.! i) (v4 V.! (i+1) )
+              | otherwise =
+                  f (v1 V.! i) (v1 V.! 0)
+                  (v2 V.! i) (v2 V.! 0)
+                  (v3 V.! i) (v3 V.! 0)
+                  (v4 V.! i) (v4 V.! 0) 
+                            
 showPoint :: Show a => Point a -> String
 showPoint (Point x y) = "(" ++ show x ++ ", " ++ show y ++ ")"
 
 -- | Create a normal path from a metapath.
-unmetaOpen :: OpenMetaPath Double -> OpenPath Double
+unmetaOpen :: OpenMetaPath Double -> Path Open Double
 unmetaOpen (OpenMetaPath nodes endpoint) =
-  unmetaOpen' (flip sanitize endpoint $
-              removeEmptyDirs nodes)
+  unmetaOpen'
+  (flip sanitize endpoint $ removeEmptyDirs nodes)
   endpoint
 
-unmetaOpen' :: [(DPoint, MetaJoin Double)] -> DPoint -> OpenPath Double
+unmetaOpen' :: [(DPoint, MetaJoin Double)] -> DPoint -> Path Open Double
 unmetaOpen' nodes endpoint =
-  let subsegs = openSubSegments nodes endpoint
-      path = joinSegments $ map unmetaSubSegment subsegs
-  in OpenPath path endpoint
-
-unmetaClosed :: ClosedMetaPath Double -> ClosedPath Double
+  joinSegments $ map unmetaSubSegment subsegs
+  where
+    subsegs = openSubSegments nodes endpoint
+    
+unmetaClosed :: ClosedMetaPath Double -> Path Closed Double
 unmetaClosed (ClosedMetaPath nodes) =
   case spanList bothOpen (removeEmptyDirs nodes) of
     ([], []) -> error "empty metapath"
@@ -179,17 +202,22 @@ unmetaClosed (ClosedMetaPath nodes) =
 -- solve a cyclic metapath as an open path if possible.
 -- rotate to the defined node, and rotate back after
 -- solving the path.
-unmetaAsOpen :: [(DPoint, MetaJoin Double)] -> [(DPoint, MetaJoin Double)] -> ClosedPath Double
-unmetaAsOpen l m = ClosedPath (l'++m') 
+unmetaAsOpen :: [(DPoint, MetaJoin Double)] -> [(DPoint, MetaJoin Double)] -> Path Closed Double
+unmetaAsOpen l [] = closeOpenPath $ unmetaOpen' (sanitizeCycle l) (fst $ head l)
+unmetaAsOpen l m = closeOpenPath $ Path l'' <> Path m''
   where n = length m
-        OpenPath o _ =
-          unmetaOpen' (sanitizeCycle (m++l)) (fst $ head (m ++l))
-        (m',l') = splitAt n o
+        Path o = unmetaOpen' (sanitizeCycle (m++l)) (fst $ head (m ++l))
+        (m',ct:l') = splitAt n o
+        (l'', m'') =
+          case ct of
+            CurveTo _ _ p -> (LineTo p: l', m'++[ct])
+            LineTo p -> (ct: l', m')
+               
 
 -- decompose into a list of subsegments that need to be solved.
 openSubSegments :: [(DPoint, MetaJoin Double)] -> DPoint -> [OpenMetaPath Double]
-openSubSegments [] _   = []
-openSubSegments l lastPoint =
+openSubSegments [] _ =  []
+openSubSegments l lastPoint = 
   case spanList (not . breakPoint) l of
     (m, n:o) ->
       let point = case o of
@@ -199,53 +227,62 @@ openSubSegments l lastPoint =
          openSubSegments o lastPoint
     _ -> error "openSubSegments': unexpected end of segments"
 
+spanList :: ([a] -> Bool) -> [a] -> ([a], [a])
+spanList _ xs@[] =  (xs, xs)
+spanList p xs@(x:xs')
+  | p xs =  let (ys,zs) = spanList p xs' in (x:ys,zs)
+  | otherwise    =  ([],xs)
+
+-- break the subsegment if the angle to the left or the right is defined or a curl.
+-- break the subsegment if the angle to the left or the right is defined or a curl.
+breakPoint :: [(DPoint, MetaJoin Double)] -> Bool
+breakPoint ((_,  MetaJoin _ _ _ Open):(_, MetaJoin Open _ _ _):_) = False
+breakPoint _ = True
+
 -- join subsegments into one segment
-joinSegments :: [OpenPath Double] -> [(DPoint, PathJoin Double)]
-joinSegments = concatMap nodes
-  where nodes (OpenPath n _) = n
-        --nodes (ClosedPath n) = n
+joinSegments :: [Path Open Double] -> Path Open Double
+joinSegments = mconcat
 
 -- solve a cyclic metapath where all angles depend on the each other.
-unmetaCyclic :: [(DPoint, MetaJoin Double)] -> ClosedPath Double
+unmetaCyclic :: [(DPoint, MetaJoin Double)] -> Path Closed Double
 unmetaCyclic nodes =
-  let points = map fst nodes
-      chords = zipWith (^-^) (tail $ cycle points) points
-      tensionsA = map (tensionL . snd) nodes
-      tensionsB = map (tensionR . snd) nodes
-      turnAngles = zipWith turnAngle chords (tail $ cycle chords)
-      thetas = solveCyclicTriD2 $
-               eqsCycle tensionsA
-               points
-               tensionsB
-               turnAngles
-      phis = zipWith (\x y -> -(x+y)) turnAngles (tail $ cycle thetas)
-  in ClosedPath $ zip points $
-     zipWith6 unmetaJoin points (tail $ cycle points)
-     thetas phis tensionsA tensionsB
+  let points = V.fromList $ map fst nodes
+      chords = zipWithNext (flip (^-^)) points points
+      tensionsA = BV.fromList $ map (tensionL . snd) nodes
+      tensionsB = BV.fromList $ map (tensionR . snd) nodes
+      turnAngles = zipWithNext turnAngle chords chords
+      thetas = solveCyclicTriD $
+               eqsCycle tensionsA points tensionsB turnAngles
+      phis = zipWithNext (\x y -> -(x+y)) turnAngles thetas
+  in Path $ LineTo (V.head points) :
+     BV.toList (BV.zipWith6 unmetaJoin (V.convert points)
+                (V.convert $ V.tail points V.++ V.singleton (V.head points))
+     (V.convert thetas) (V.convert phis) tensionsA tensionsB)
 
 -- solve a subsegment
-unmetaSubSegment :: OpenMetaPath Double -> OpenPath Double
+unmetaSubSegment :: OpenMetaPath Double -> Path Open Double
 
 -- the simple case where the control points are already given.
 unmetaSubSegment (OpenMetaPath [(p, Controls u v)] q) =
-  OpenPath [(p, JoinCurve u v)] q
+  Path [LineTo p, CurveTo u v q]
 
 -- otherwise solve the angles, and find the control points
 unmetaSubSegment (OpenMetaPath nodes lastpoint) =
-  let points = map fst nodes ++ [lastpoint]
-      joins = map snd nodes
-      chords = zipWith (^-^) (tail points) points
-      tensionsA = map tensionL joins
-      tensionsB = map tensionR joins
-      turnAngles = zipWith turnAngle chords (tail chords) ++ [0]
+  let points = V.fromList $ map fst nodes ++ [lastpoint]
+      joins = BV.fromList $ map snd nodes
+      chords = V.zipWith (^-^) (V.tail points) points
+      tensionsA = BV.map tensionL joins
+      tensionsB = BV.map tensionR joins
+      turnAngles = V.zipWith turnAngle chords (V.tail chords) V.++ V.singleton 0
       thetas = solveTriDiagonal2 $
                eqsOpen points joins chords turnAngles
-               (map tensionValue tensionsA)
-               (map tensionValue tensionsB)
-      phis = zipWith (\x y -> -(x+y)) turnAngles (tail thetas)
+               (V.convert $ BV.map tensionValue tensionsA)
+               (V.convert $ BV.map tensionValue tensionsB)
+      phis = V.zipWith (\x y -> -(x+y)) turnAngles (V.tail thetas)
       pathjoins =
-        zipWith6 unmetaJoin points (tail points) thetas phis tensionsA tensionsB
-  in OpenPath (zip points pathjoins) lastpoint
+        BV.zipWith6 unmetaJoin (V.convert points) (BV.tail $ V.convert points)
+        (V.convert thetas) (V.convert phis) tensionsA tensionsB
+  in Path $ LineTo (V.head points) : BV.toList pathjoins
 
 removeEmptyDirs :: [(DPoint, MetaJoin Double)] -> [(DPoint, MetaJoin Double)]
 removeEmptyDirs = map remove
@@ -271,6 +308,7 @@ sanitizeCycle l = take n $ tail $
   where n = length l
 
 sanitize :: [(DPoint, MetaJoin Double)] -> DPoint -> [(DPoint, MetaJoin Double)]
+
 sanitize [] _ = []
 
 -- ending open => curl
@@ -320,17 +358,6 @@ sanitize ((p, m): (q, n): rest) r =
 
 sanitize (n:l) r = n:sanitize l r
 
-spanList :: ([a] -> Bool) -> [a] -> ([a], [a])
-spanList _ xs@[] =  (xs, xs)
-spanList p xs@(x:xs')
-  | p xs =  let (ys,zs) = spanList p xs' in (x:ys,zs)
-  | otherwise    =  ([],xs)
-
--- break the subsegment if the angle to the left or the right is defined or a curl.
-breakPoint :: [(DPoint, MetaJoin Double)] -> Bool
-breakPoint ((_,  MetaJoin _ _ _ Open):(_, MetaJoin Open _ _ _):_) = False
-breakPoint _ = True
-
 -- solve the tridiagonal system for t[i]:
 -- a[n] t[i-1] + b[n] t[i] + c[n] t[i+1] = d[i]
 -- where a[0] = c[n] = 0
@@ -339,90 +366,94 @@ breakPoint _ = True
 -- where u[n] = 0
 -- then solving for t[n]
 -- see metafont the program: ¶ 283
-solveTriDiagonal2 :: [(Double, Double, Double, Double)] -> [Double]
-solveTriDiagonal2 [] = error "solveTriDiagonal: not enough equations"
-solveTriDiagonal2 ((_, b0, c0, d0): rows) =
-  V.toList $ solveTriDiagonal (b0, c0, d0) (V.fromList rows)
+solveTriDiagonal2 :: V.Vector (Double, Double, Double, Double) -> V.Vector Double
+solveTriDiagonal2 v
+  | V.length v == 0 = error "solveTriDiagonal: not enough equations"
+  | otherwise = solveTriDiagonal (b0, c0, d0) rows
+    where (_, b0, c0, d0) = V.head v
+          rows = V.tail v
 
 -- test = ((80.0,58.0,51.0),[(-432.0,78.0,102.0,503.0),(71.0,-82.0,20.0,2130.0),(52.39,-10.43,4.0,56.0),(34.0,38.0,0.0,257.0)])
 -- [-15.726940528143576,22.571642107784243,-78.93751365259996,-297.27313545829384,272.74438435742667]
       
--- solve the cyclic tridiagonal system.
--- see metafont the program: ¶ 286
-solveCyclicTriD2 :: [(Double, Double, Double, Double)] -> [Double]
-solveCyclicTriD2 = V.toList . solveCyclicTriD . V.fromList
-
 turnAngle :: DPoint -> DPoint -> Double
 turnAngle (Point 0 0) _ = 0
 turnAngle (Point x y) q = vectorAngle $ rotateVec p $* q
   where p = Point x (-y)
 
-zipNext :: [b] -> [(b, b)]
-zipNext [] = []
-zipNext l = zip l (tail $ cycle l)
-
 -- find the equations for a cycle containing only open points
-eqsCycle :: [Tension Double] -> [DPoint] -> [Tension Double]
-         -> [Double] -> [(Double, Double, Double, Double)]
+eqsCycle :: BV.Vector (Tension Double) -> V.Vector DPoint
+         -> BV.Vector (Tension Double) -> V.Vector Double
+         -> V.Vector (Double, Double, Double, Double)
 eqsCycle tensionsA points tensionsB turnAngles = 
-  zipWith4 eqTension
-  (zipNext (map tensionValue tensionsA))
-  (zipNext dists)
-  (zipNext turnAngles)
-  (zipNext (map tensionValue tensionsB))
+  zipWithNext4 eqTension
+  (V.convert $ BV.map tensionValue tensionsA)
+  dists turnAngles
+  (V.convert $ BV.map tensionValue tensionsB)
   where 
-    dists = zipWith vectorDistance points (tail $ cycle points)
+    dists = V.zipWith vectorDistance points (V.tail points V.++ points)
 
 -- find the equations for an path with open points.
 -- The first and last node should be a curl or a given angle
 
-eqsOpen :: [DPoint] -> [MetaJoin Double] -> [DPoint] -> [Double]
-        -> [Double] -> [Double] -> [(Double, Double, Double, Double)]
-eqsOpen _ [MetaJoin mt1 t1 t2 mt2] [delta] _ _ _ =
-  let replaceType Open = Curl 1
-      replaceType t = t
-  in case (replaceType mt1, replaceType mt2) of
-    (Curl g, Direction dir) ->
-      [eqCurl0 g (tensionValue t1) (tensionValue t2) 0,
-       (0, 1, 0, turnAngle delta dir)]
-    (Direction dir, Curl g) ->
-      [(0, 1, 0, turnAngle delta dir),
-       eqCurlN g (tensionValue t1) (tensionValue t2)]
-    (Direction dir, Direction dir2) ->
-      [(0, 1, 0, turnAngle delta dir),
-       (0, 1, 0, turnAngle delta dir2)]
-    (Curl _, Curl _) ->
-      [(0, 1, 0, 0), (0, 1, 0, 0)]
-    _ -> error "illegal end of open path"
+replaceOpen :: Num a => MetaNodeType a -> MetaNodeType a
+replaceOpen Open = Curl 1
+replaceOpen t = t
 
-eqsOpen points joins chords turnAngles tensionsA tensionsB =
-  eq0 : restEquations joins tensionsA dists turnAngles tensionsB
+eqsOpen :: V.Vector DPoint -> BV.Vector (MetaJoin Double) -> V.Vector DPoint
+        -> V.Vector Double -> V.Vector Double -> V.Vector Double
+        -> V.Vector (Double, Double, Double, Double)
+eqsOpen points joins chords turnAngles tensionsA tensionsB
+  | BV.length joins == 0 = error "empty segment"
+  | BV.length joins == 1 =
+      let MetaJoin mt1 t1 t2 mt2 = BV.head joins
+          delta = V.head chords
+      in case (replaceOpen mt1, replaceOpen mt2) of
+        (Curl g, Direction dir) ->
+          V.fromList [
+          (eqCurl0 g (tensionValue t1) (tensionValue t2) 0),
+          (0, 1, 0, turnAngle delta dir)]
+        (Direction dir, Curl g) ->
+          V.fromList [
+          (0, 1, 0, turnAngle delta dir),
+          eqCurlN g (tensionValue t1) (tensionValue t2)]
+        (Direction dir, Direction dir2) ->
+          V.fromList [
+          (0, 1, 0, turnAngle delta dir),
+          (0, 1, 0, turnAngle delta dir2)]
+        (Curl _, Curl _) ->
+          V.fromList [
+          (0, 1, 0, 0),
+          (0, 1, 0, 0)]
+        _ -> error "Illegal open path"
+  | otherwise = V.generate (BV.length joins+1) eqs
   where
-    dists = zipWith vectorDistance points (tail points)      
-    eq0 = case head joins of
-      (MetaJoin (Curl g) _ _ _) -> eqCurl0 g (head tensionsA) (head tensionsB) (head turnAngles)
-      (MetaJoin (Direction dir) _ _ _) -> (0, 1, 0, turnAngle (head chords) dir)
-      (MetaJoin Open _ _ _) -> eqCurl0 1 (head tensionsA) (head tensionsB) (head turnAngles)
-      (Controls _ _) -> error "eqsOpen: illegal join"
-
-    restEquations [lastnode] (tensionA:_) _ _ (tensionB:_) =
-      case lastnode of
-        MetaJoin _ _ _ (Curl g) -> [eqCurlN g tensionA tensionB]
-        MetaJoin _ _ _ Open -> [eqCurlN 1 tensionA tensionB]
-        MetaJoin _ _ _ (Direction dir) -> [(0, 1, 0, turnAngle (last chords) dir)]
-        (Controls _ _) -> error "eqsOpen: illegal join"
-
-    restEquations (_:othernodes) (tensionA:restTA) (d:restD) (turn:restTurn) (tensionB:restTB) =
-      eqTension (tensionA, head restTA) (d, head restD) (turn, head restTurn) (tensionB, head restTB) :
-      restEquations othernodes restTA restD restTurn restTB
-
-    restEquations _ _ _ _ _ = error "eqsOpen: illegal rest equations"
+    dists = V.zipWith vectorDistance points (V.tail points)      
+    eqs i | i == 0 = case BV.head joins of
+              (MetaJoin (Curl g) _ _ _) ->
+                eqCurl0 g (V.head tensionsA) (V.head tensionsB) (V.head turnAngles)
+              (MetaJoin (Direction dir) _ _ _) ->
+                (0, 1, 0, turnAngle (V.head chords) dir)
+              (MetaJoin Open _ _ _) ->
+                eqCurl0 1 (V.head tensionsA) (V.head tensionsB) (V.head turnAngles)
+              _ -> error "eqsOpen: illegal join"
+          | i < BV.length joins =
+              eqTension (tensionsA V.! (i-1)) (tensionsA V.! i) (dists V.! (i-1)) (dists V.! i)
+              (turnAngles V.! (i-1)) (turnAngles V.! i) (tensionsB V.! (i-1)) (tensionsB V.! i)
+          | otherwise = case joins BV.! (i-1) of
+              MetaJoin _ _ _ (Curl g) ->
+                eqCurlN g (tensionsA V.! (i-1)) (tensionsB V.! (i-1))
+              MetaJoin _ _ _ (Direction dir) ->
+                (0, 1, 0, turnAngle (V.last chords) dir)
+              MetaJoin _ _ _ Open ->
+                eqCurlN 1 (tensionsA V.! (i-1)) (tensionsB V.! (i-1))
+              _ -> error "eqsOpen: illegal join"
 
 -- the equation for an open node
-eqTension :: (Double, Double) -> (Double, Double)
-          -> (Double, Double) -> (Double, Double)
+eqTension :: Double -> Double -> Double -> Double 
+          -> Double -> Double -> Double -> Double
           -> (Double, Double, Double, Double)
-eqTension (tensionA', tensionA) (dist', dist) (psi', psi) (tensionB', tensionB) =
+eqTension tensionA' tensionA dist' dist psi' psi tensionB' tensionB =
   (a, b+c, d, -b*psi' - d*psi)
   where
     a = tensionB' * tensionB' / (tensionA' * dist')
@@ -453,8 +484,8 @@ eqCurlN gamma tensionA tensionB = (a, b, 0, 0)
 unmetaJoin :: DPoint -> DPoint -> Double -> Double -> Tension Double
            -> Tension Double -> PathJoin Double
 unmetaJoin !z0 !z1 !theta !phi !alpha !beta
-  | abs phi < 1e-4 && abs theta < 1e-4 = JoinLine
-  | otherwise = JoinCurve u v
+  | abs phi < 1e-4 && abs theta < 1e-4 = LineTo z1
+  | otherwise = CurveTo u v z1
   where Point dx dy = z1^-^z0
         bounded = (sf <= 0 && st <= 0 && sf <= 0) ||
                   (sf >= 0 && st >= 0 && sf >= 0)

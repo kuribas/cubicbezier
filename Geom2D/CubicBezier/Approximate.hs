@@ -34,14 +34,14 @@ approximatePath :: (V.Unbox a, Ord a, Floating a) =>
                 -- ^ Calculate the result faster, but with more
                 -- subcurves.  Runs typically 10 times faster, but
                 -- generates 50% more subcurves.   Useful for interactive use.
-                -> [CubicBezier a]
+                -> Path Open a
 approximatePath f n tol tmin tmax fast
-  | err < tol = [curve]
-  | otherwise = approximatePath' f n tol tmin tmax fast
+  | err < tol = curvesToOpen [curve]
+  | otherwise = curvesToOpen $ approximatePath' f n tol tmin tmax fast
   where
     (curve, err) = approx1cubic n f tmin tmax (if fast then 0 else 5)
 {-# SPECIALIZE approximatePath :: (Double -> (DPoint, DPoint)) -> Int -> Double
-                               -> Double -> Double -> Bool -> [CubicBezier Double]  #-}
+                               -> Double -> Double -> Bool -> Path Open Double #-}
 
 -- | Approximate a function with piecewise quadratic bezier splines
 -- using a least-squares fit, within the given tolerance.  It is
@@ -71,7 +71,8 @@ quadDist :: (V.Unbox a, Ord a, Floating a) =>
             (a -> (Point a, Point a)) -> QuadBezier a -> a
          -> a -> Int -> a -> a
 quadDist f qb tmin tmax maxiter t =
-  quadDist' f qb tmin tmax t (fst (f $ interpolate tmin tmax t)) maxiter (evalBezierDeriv qb t)
+  quadDist' f qb tmin tmax t
+  (fst (f $ interpolate tmin tmax t)) maxiter (evalBezierDeriv qb t)
 
 quadDist' :: (V.Unbox a, Ord a, Floating a) =>
              (a -> (Point a, Point a))
@@ -182,8 +183,9 @@ approximatePathMax :: (V.Unbox a, Floating a, Ord a) =>
                    -- subcurves.  Runs faster (typically 10 times),
                    -- but generates more subcurves (about 50%).
                    -- Useful for interactive use.
-                   -> [CubicBezier a]
+                   -> Path Open a
 approximatePathMax m f samples tol tmin tmax fast =
+  curvesToOpen $ 
   approxMax f tol m fast (splitCubic samples) segments
   where segments = M.singleton err (FunctionSegment tmin tmax outline)
         (p0, p0') = f tmin
@@ -196,7 +198,7 @@ approximatePathMax m f samples tol tmin tmax fast =
           approximateCubic curveCb points (Just ts) (if fast then 0 else 5)
 {-# SPECIALIZE approximatePathMax ::
     Int -> (Double -> (Point Double, Point Double)) -> Int                      
-    -> Double -> Double -> Double -> Bool -> [CubicBezier Double] #-}
+    -> Double -> Double -> Double -> Bool -> Path Open Double #-}
 data FunctionSegment b a = FunctionSegment {
   fsTmin :: !a,  -- the least t param of the segment in the original curve
   _fsTmax :: !a,  -- the max t param of the segment in the original curve

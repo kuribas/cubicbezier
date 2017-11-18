@@ -595,7 +595,7 @@ below instead.  Adjust the turnRatios for each curve.
 Send curves to output
 ---------------------
 
-> outputPaths :: M.Map PointEvent [CubicBezier Double] -> [ClosedPath Double]
+> outputPaths :: M.Map PointEvent [CubicBezier Double] -> [Path Closed Double]
 > outputPaths m
 >   | M.null m = []
 >   | otherwise = outputNext m
@@ -617,7 +617,7 @@ Send curves to output
 >         in go m0' c0 [] p0
 >     go !m !next !prev !start
 >       | p == start =
->           curvesToPath (reverse $ next:prev):
+>           curvesToClosed (reverse $ next:prev):
 >           outputNext m
 >       | otherwise =
 >         case lookupDelete p m of
@@ -625,11 +625,6 @@ Send curves to output
 >          Just (x, m') -> go m' x (next:prev) start
 >       where p = cubicC3 next
 >
-> curvesToPath :: [CubicBezier Double] -> ClosedPath Double
-> curvesToPath =
->   ClosedPath .
->   map (\(CubicBezier p0 p1 p2 _) ->
->         (p0, JoinCurve p1 p2))
 
 Filter and output the given curves.  The `isInside` function
 determines the *insideness* of a give turnratio.  For example for the
@@ -1134,10 +1129,10 @@ Higher level functions
 > -- | `O((n+m)*log(n+m))`, for `n` segments and `m` intersections.
 > -- Union of paths, removing overlap and rounding to the given
 > -- tolerance.
-> union :: [ClosedPath Double] -- ^ Paths
+> union :: [Path Closed Double] -- ^ Paths
 >          -> FillRule         -- ^ input fillrule
 >          -> Double           -- ^ Tolerance
->          -> [ClosedPath Double]
+>          -> [Path Closed Double]
 > union p fill tol =
 >   outputPaths $ view output $ runSweep sweep $ 
 >   loopEvents (fillFunction fill . fst) tol
@@ -1157,11 +1152,11 @@ Higher level functions
 > -- | `O((n+m)*log(n+m))`, for `n` segments and `m` intersections.
 > -- Combine paths using the given boolean operation
 > boolPathOp :: (Bool -> Bool -> Bool) -- ^ operation
->           -> [ClosedPath Double]     -- ^ first path (merged with union)
->           -> [ClosedPath Double]     -- ^ second path (merged with union)
+>           -> [Path Closed Double]     -- ^ first path (merged with union)
+>           -> [Path Closed Double]     -- ^ second path (merged with union)
 >           -> FillRule                -- ^ input fillrule
 >           -> Double                  -- ^ tolerance 
->           -> [ClosedPath Double]
+>           -> [Path Closed Double]
 > boolPathOp op p1 p2 fill tol =
 >   outputPaths $ view output $ runSweep sweep $
 >   loopEvents isInside tol
@@ -1181,8 +1176,8 @@ Higher level functions
 >             concatMap closedPathCurves p2)
 >
 > intersection, difference, exclusion ::
->   [ClosedPath Double] -> [ClosedPath Double] ->
->   FillRule -> Double -> [ClosedPath Double]
+>   [Path Closed Double] -> [Path Closed Double] ->
+>   FillRule -> Double -> [Path Closed Double]
 >
 > -- | path intersection  
 > intersection = boolPathOp (&&)

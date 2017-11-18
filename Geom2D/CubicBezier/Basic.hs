@@ -1,10 +1,11 @@
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE BangPatterns, FlexibleInstances, MultiParamTypeClasses, DeriveTraversable, ViewPatterns, PatternSynonyms, MultiWayIf #-}
+{-# LANGUAGE EmptyDataDecls #-}
 module Geom2D.CubicBezier.Basic
        (CubicBezier (..), QuadBezier (..), AnyBezier (..), GenericBezier(..),
-        PathJoin (..), ClosedPath(..), OpenPath (..), AffineTransform (..), anyToCubic, anyToQuad,
+        PathJoin (..), Path(..), Closed, Open, AffineTransform (..), anyToCubic, anyToQuad,
         openPathCurves, closedPathCurves, curvesToOpen, curvesToClosed,
-        consOpenPath, consClosedPath, openClosedPath, closeOpenPath, 
+        openClosedPath, closeOpenPath, 
         bezierParam, bezierParamTolerance, reorient, bezierToBernstein,
         evalBezierDerivs, evalBezier, evalBezierDeriv, findBezierTangent, quadToCubic,
         bezierHoriz, bezierVert, findBezierInflection, findBezierCusp,
@@ -15,11 +16,7 @@ import Geom2D
 import Geom2D.CubicBezier.Numeric
 import Math.BernsteinPoly
 import Numeric.Integration.TanhSinh
-import Data.Monoid ()
-import Data.List (minimumBy)
-import Data.Function (on)
-import Data.VectorSpace
-import Debug.Trace
+import Data.Monoid
 
 import qualified Data.Vector.Unboxed as V
 import qualified Data.Vector.Unboxed.Mutable as MV
@@ -85,33 +82,33 @@ instance GenericBezier AnyBezier where
   toVector (AnyBezier v) = v
   unsafeFromVector = AnyBezier
 
-data PathJoin a = JoinLine |
-                  JoinCurve (Point a) (Point a)
-              deriving (Show, Functor, Foldable, Traversable)
-data OpenPath a = OpenPath [(Point a, PathJoin a)] (Point a) 
-                  deriving (Show, Functor, Foldable, Traversable)
-data ClosedPath a = ClosedPath [(Point a, PathJoin a)]
-                  deriving (Show, Functor, Foldable, Traversable)
+data PathJoin a = LineTo (Point a) |
+                  CurveTo (Point a) (Point a) (Point a)
+  deriving (Show, Functor, Foldable, Traversable)
+data Path b a = Path [PathJoin a]
+  deriving (Show, Functor, Foldable, Traversable)
 
-instance Monoid (OpenPath a) where
-  mempty = OpenPath [] (error "empty path")
-  mappend p1 (OpenPath [] _) = p1
-  mappend (OpenPath [] _) p2 = p2
-  mappend (OpenPath joins1 _) (OpenPath joins2 p) =
-    OpenPath (joins1 ++ joins2) p
+data Open
+data Closed
 
+instance Monoid (Path Open Double) where
+  mempty = Path []
+  mappend (Path a) (Path b) = Path (concatPath a b)
+
+concatPath :: Eq a => [PathJoin a] -> [PathJoin a] -> [PathJoin a]
+concatPath [LineTo a] p@(LineTo b:_)
+  | a == b = p
+concatPath [CurveTo a b c] (LineTo d:r)
+  | c == d = CurveTo a b c: r
+concatPath (a:b) c = a: concatPath b c
+concatPath [] c = c
+  
 instance (Num a) => AffineTransform (PathJoin a) a where
-  transform _ JoinLine = JoinLine
-  transform t (JoinCurve p q) = JoinCurve (transform t p) (transform t q)
+  transform t (LineTo p) = LineTo $ transform t p
+  transform t (CurveTo a b c) = CurveTo (transform t a) (transform t b) (transform t c)
 
-instance (Num a) => AffineTransform (OpenPath a) a where
-  transform t (OpenPath s p) = OpenPath (map (transformSeg t) s) (transform t p)
-
-transformSeg :: (Num a) => Transform a -> (Point a, PathJoin a) -> (Point a, PathJoin a)
-transformSeg t (p, jn) = (transform t p, transform t jn)
-
-instance (Num a) => AffineTransform (ClosedPath a) a where
-  transform t (ClosedPath s) = ClosedPath (map (transformSeg t) s)
+instance (Num a) => AffineTransform (Path b a) a where
+  transform t (Path s) = Path (map (transform t) s)
 
 instance (Num a) => AffineTransform (CubicBezier a) a where
   {-# SPECIALIZE transform :: Transform Double -> CubicBezier Double -> CubicBezier Double #-}
@@ -123,64 +120,71 @@ instance (Num a) => AffineTransform (QuadBezier a) a where
   transform t (QuadBezier c0 c1 c2) =
     QuadBezier (transform t c0) (transform t c1) (transform t c2)
 
--- | construct an open path
-consOpenPath :: Point a -> PathJoin a -> OpenPath a -> OpenPath a
-consOpenPath p join (OpenPath joins q) =
-  OpenPath ((p, join):joins) q
-
--- | construct a closed path
-consClosedPath :: Point a -> PathJoin a -> ClosedPath a -> ClosedPath a
-consClosedPath p join (ClosedPath joins) =
-  ClosedPath ((p, join):joins)
-
 -- | Return the open path as a list of curves.
-openPathCurves :: Fractional a => OpenPath a -> [CubicBezier a]
-openPathCurves (OpenPath curves p) = go curves p
-  where
-    go [] _ = []
-    go [(p0, jn)] q = [makeCB p0 jn q]
-    go ((p0, jn):rest@((p1,_):_)) q =
-      makeCB p0 jn p1 : go rest q
-    makeCB p0 JoinLine p1 =
-      CubicBezier p0 (interpolateVector p0 p1 (1/3))
-      (interpolateVector p0 p1 (2/3)) p1
-    makeCB p0 (JoinCurve p1 p2) p3 =
-      CubicBezier p0 p1 p2 p3
+openPathCurves :: Fractional a => Path Open a -> [CubicBezier a]
+openPathCurves (Path (LineTo p:r)) = openPathCurves' p r
+openPathCurves (Path (CurveTo _ _ p:r)) = openPathCurves' p r
+openPathCurves (Path []) = []
 
+openPathCurves' :: Fractional a => Point a -> [PathJoin a] -> [CubicBezier a]
+openPathCurves' p (LineTo p1:r) = makeLine p p1: openPathCurves' p1 r
+openPathCurves' p (CurveTo a b c:r) = CubicBezier p a b c: openPathCurves' c r
+openPathCurves' _ [] = []
+    
+makeLine :: Fractional a => Point a -> Point a -> CubicBezier a
+makeLine p0 p1 =
+  CubicBezier p0 (interpolateVector p0 p1 (1/3))
+  (interpolateVector p0 p1 (2/3)) p1
+    
 -- | Return the closed path as a list of curves
-closedPathCurves :: Fractional a => ClosedPath a -> [CubicBezier a]
-closedPathCurves (ClosedPath []) = []
-closedPathCurves (ClosedPath (cs@((p1, _):_))) =
-  openPathCurves (OpenPath cs p1)
+closedPathCurves :: Fractional a => Path Closed a -> [CubicBezier a]
+closedPathCurves (Path (j@(LineTo p):r)) = closedPathCurves' p j r
+closedPathCurves (Path (j@(CurveTo _ _ p):r)) = closedPathCurves' p j r
+closedPathCurves (Path []) = []
+
+closedPathCurves' :: Fractional a => Point a
+                  -> PathJoin a -> [PathJoin a] -> [CubicBezier a]
+closedPathCurves' p (LineTo p0) [] = [makeLine p p0]
+closedPathCurves' p (CurveTo a b c) [] = [CubicBezier p a b c]
+closedPathCurves' p j (LineTo p1:r) = makeLine p p1: closedPathCurves' p1 j r
+
+closedPathCurves' p j (CurveTo a b c:r) = CubicBezier p a b c: closedPathCurves' c j r
 
 -- | Make an open path from a list of curves.  The last control point
 -- of each curve except the last is ignored.
-curvesToOpen :: [CubicBezier a] -> OpenPath a
-curvesToOpen [] = OpenPath [] undefined
-curvesToOpen [CubicBezier p0 p1 p2 p3] =
-  OpenPath [(p0, JoinCurve p1 p2)] p3
-curvesToOpen (CubicBezier p0 p1 p2 _:cs) =
-  OpenPath ((p0, JoinCurve p1 p2):rest) lastP
-  where
-    OpenPath rest lastP = curvesToOpen cs
+curvesToOpen :: Eq a => [CubicBezier a] -> Path Open a
+curvesToOpen [] = Path []
+curvesToOpen (CubicBezier a b c d:r) =
+  Path $ LineTo a: CurveTo b c d: curvesToOpen' d r
 
+curvesToOpen' :: Eq a => Point a -> [CubicBezier a] -> [PathJoin a]
+curvesToOpen' _ [] = []
+curvesToOpen' p (CubicBezier a b c d:r)
+  | a == p = CurveTo b c d: curvesToOpen' d r
+  | otherwise = LineTo a: CurveTo b c d: curvesToOpen' d r
+  
 -- | Make an open path from a list of curves.  The last control point
 -- of each curve is ignored.
-curvesToClosed :: [CubicBezier a] -> ClosedPath a
-curvesToClosed cs = ClosedPath cs2
-  where
-    OpenPath cs2 _ = curvesToOpen cs
+curvesToClosed :: Eq a => [CubicBezier a] -> Path Closed a
+curvesToClosed [] = Path []
+curvesToClosed c@(CubicBezier a _ _ d:_) =
+  Path $ curvesToClosed' a d c
+
+curvesToClosed' :: Eq a => Point a -> Point a -> [CubicBezier a] -> [PathJoin a]
+curvesToClosed' p0 p []
+  | p0 == p = []
+  | otherwise = [LineTo p0]
+curvesToClosed' p0 p (CubicBezier a b c d:r)
+  | a == p = CurveTo b c d: curvesToClosed' p0 d r
+  | otherwise = LineTo a: CurveTo b c d: curvesToClosed' p0 d r
 
 -- | close an open path, discarding the last point
-closeOpenPath :: OpenPath a -> ClosedPath a
-closeOpenPath (OpenPath j p) = ClosedPath j
+closeOpenPath :: Path Open a -> Path Closed a
+closeOpenPath (Path s) = Path s
 
 -- | open a closed path
-openClosedPath :: ClosedPath a -> OpenPath a
-openClosedPath (ClosedPath []) = OpenPath [] (error "empty path")
-openClosedPath (ClosedPath j@((p,_):_)) = OpenPath j p
-
-
+openClosedPath :: Path Closed a -> Path Open a
+openClosedPath (Path s) = Path s
 
 -- | safely convert from `AnyBezier' to `CubicBezier`
 anyToCubic :: (V.Unbox a) => AnyBezier a -> Maybe (CubicBezier a)

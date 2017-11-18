@@ -1,51 +1,91 @@
 {-# LANGUAGE MultiParamTypeClasses, FlexibleInstances #-}
 module Geom2D.CubicBezier.Stroke
-       (penCircle, pathToPen, penStrokeOpen, penStrokeClosed, Pen,
-        bezierOffset)
+--       (penCircle, pathToPen, penStrokeOpen, penStrokeClosed, Pen,
+--        bezierOffset)
        where
 import Geom2D
 import Geom2D.CubicBezier
 import Data.Monoid
+import qualified Data.Vector as V
+
+data Pen = PenEllipse (Transform Double) (Transform  Double) (Transform Double)
+         | PenPath (FindDir PenSegment)
+
+data PenSegment = PenCorner !DPoint
+                | PenCurve !(CubicBezier Double)
+
+data FindDir b = FindDir DPoint (V.Vector (DPoint, b)) (V.Vector (DPoint, b))
 
 
-data Pen a = PenEllipse (Transform a) (Transform a) (Transform a)
-           | PenPath [PenSegment a]
+clockwise :: DPoint -> DPoint -> Bool
+clockwise v1 v2 =
+  vc > 0 ||
+  (vc == 0 && signum (pointX v1) == signum (pointX v2) &&
+   signum (pointY v1) == signum (pointY v2))
+  where vc = vectorCross v2 v1
 
-data PenSegment a = PenCorner !(Point a) !(Point a)
-                  | PenCurve !(Point a) !(CubicBezier a)
+square :: Double -> Double
+square x = x*x
+
+-- angle between two vectors is small
+closeDirs :: DPoint -> DPoint -> Bool
+closeDirs v1 v2 =
+  (1 - (abs dp * dp / (vectorMagSquare v1*vectorMagSquare v2))) < 1e-5
+  where dp = v1 ^.^ v2
+
+findDir :: FindDir b -> DPoint -> b
+findDir (FindDir dir1 lft rt) dir
+  | clockwise dir1 dir =
+      findDirPart lft dir 0 (V.length lft-1)
+  | otherwise =
+      findDirPart rt dir 0 (V.length rt-1)
+
+-- binary search on the directions
+findDirPart :: (V.Vector (DPoint, b)) -> DPoint -> Int -> Int -> b
+findDirPart part dir min_ max_
+  | min_ == max_ = snd $ part V.! min_
+  | clockwise midDir dir =
+      findDirPart part dir min_ (mid-1)
+  | otherwise =
+      findDirPart part dir mid max_
+  where
+    midDir = fst $ part V.! mid
+    mid = min_ + (max_ - min_ + 1) `quot` 2
 
 -- | A circular pen with unit radius.
-penCircle :: (Floating a) => Pen a
+penCircle :: Pen
 penCircle = PenEllipse idTrans rotate90L rotate90R
-{-# SPECIALIZE penCircle :: Pen Double #-}
 
 -- | Create a pen from a path.  For predictable results the path
 -- should be convex.
-pathToPen :: (Floating a) => ClosedPath a -> Pen a
-pathToPen (ClosedPath []) = PenPath []
+pathToPen :: ClosedPath Double -> Pen
+pathToPen (ClosedPath []) =
+  PenPath $ FindDir (Point 1.0 0.0)
+  (V.fromList [(Point 1.0 0, PenCorner $ Point 0 0)])
+  (V.fromList [(Point (-1.0) 0, PenCorner $ Point 0 0)])
 pathToPen (ClosedPath nodes) =
-  PenPath $ pathToPen' $ nodes ++ take 2 nodes
+  PenPath $ splitPartitions $ pathPartitions $ nodes ++ [head nodes]
 
-pathToPen' :: Num a => [(Point a, PathJoin a)] -> [PenSegment a]
-pathToPen' []     = []
-pathToPen' [_]    = []
-pathToPen' [_, _] = []
-pathToPen' ((p, JoinLine):tl@((q, JoinLine):_)) =
-  PenCorner (q ^-^ p) q : pathToPen' tl
+pathPartitions :: [(DPoint, PathJoin Double)] -> [(DPoint, PenSegment)]
+pathPartitions ((p, JoinLine):tl@((q, _):_)) =
+  (q ^-^ p, PenCorner q) :
+  pathPartitions tl
 
-pathToPen' ((_, JoinCurve _ _):tl@((_, JoinLine):_)) =
-  pathToPen' tl
+pathPartitions ((p1, JoinCurve p2 p3):tl@((p4, _):_)) =
+  (p2 ^-^ p1, PenCurve (CubicBezier p1 p2 p3 p4)) :
+  (p4 ^-^ p3, PenCorner p4) : 
+  pathPartitions tl
 
-pathToPen' ((p, JoinLine):tl@((q1, JoinCurve q2 q3):(q4, _):_)) =
-  PenCurve  (q1 ^-^ p) (CubicBezier q1 q2 q3 q4) :
-  pathToPen' tl
+pathPartitions _ = []
 
-pathToPen' ((_, JoinCurve _ p3):tl@((q1, JoinCurve q2 q3):(q4, _):_)) =
-  PenCurve  (q1 ^-^ p3) (CubicBezier q1 q2 q3 q4) :
-  pathToPen' tl
+splitPartitions :: [(DPoint, b)] -> FindDir b
+splitPartitions [] = error "splitPartitions: empty"
+splitPartitions ps@((dir1,_):_) = FindDir dir1 (V.fromList lft) (V.fromList rt)
+  where
+    (lft, rt_) = span (clockwise dir1 . fst) ps
+    rt = last lft:rt_
 
-  
-noTranslate :: Num a => Transform a -> Transform a
+noTranslate :: Transform Double -> Transform Double
 noTranslate (Transform a b _ c d _) =
   Transform a b 0 c d 0
 
@@ -74,12 +114,12 @@ instance (Floating a, Eq a) => AffineTransform (Pen a) a where
     PenPath $ map (transformSegment t) segments
 
 transformSegment :: Num b => Transform b -> PenSegment b -> PenSegment b
-transformSegment t (PenCorner p q) =
-  PenCorner (transform t (q^+^p) ^-^ q')  q'
+transformSegment t (p, PenCorner q) =
+  ((transform t (q^+^p) ^-^ q'), q')
   where q' = transform t q
 
 transformSegment t (PenCurve p c) =
-  PenCurve (transform t (cubicC0 c^+^p) ^-^ cubicC0 c')  c'
+  ((transform t (cubicC0 c^+^p) ^-^ cubicC0 c'), PenCurve  c')
   where c' = transform t c
 
 offsetPoint :: (Floating a) =>  a -> Point a -> Point a -> Point a
@@ -320,4 +360,3 @@ nextVector v
   | pointX v <= 0 &&
     pointY v < 0 = Point (-1) 0
   | otherwise = Point 0 1
-  

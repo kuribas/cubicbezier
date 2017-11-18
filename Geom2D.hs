@@ -11,7 +11,7 @@ import qualified Data.Vector.Unboxed as V
 import Data.VectorSpace
 import Data.Cross
 import Control.Monad
-import Numeric.FastMath
+import Numeric.FastMath()
 
 infixr 5 $*
 
