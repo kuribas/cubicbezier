@@ -49,6 +49,10 @@ Library
     Geom2D.CubicBezier.Stroke
     Math.BernsteinPoly
     Geom2D.CubicBezier.Numeric
+  Other-Modules:
+    Geom2D.CubicBezier.StrokeIntern
+                               
+                        
 
 test-suite test
   type: exitcode-stdio-1.0

@@ -42,11 +42,9 @@ Let's begin with declaring the module and library imports:
 > import Geom2D
 > import Geom2D.CubicBezier.Basic
 > import Geom2D.CubicBezier.Intersection
-> import Geom2D.CubicBezier.Numeric
-> import Math.BernsteinPoly
 > import Data.Foldable (traverse_)
 > import Data.Functor ((<$>))
-> import Data.List (sortBy, sort, intercalate, intersperse)
+> import Data.List (sortBy, sort, intersperse)
 > import Control.Monad.State.Strict
 > import Lens.Micro
 > import Lens.Micro.TH
@@ -56,8 +54,7 @@ Let's begin with declaring the module and library imports:
 > import Text.Printf
 > import Data.Ratio
 > import Data.Tuple
-> import Data.IORef
-> import Data.Maybe (isJust, isNothing, mapMaybe)
+> import Data.Maybe (isNothing, mapMaybe)
 
 #ifdef DEBUG
 > import System.IO.Unsafe (unsafePerformIO)
@@ -186,6 +183,7 @@ pointEvent (above), and the right set the elements greater (below):
 
 Some functions for debugging:
 
+> showCurve :: CubicBezier Double -> [Char]
 > showCurve (CubicBezier p0 p1 p2 p3) =
 >   showPt p0 ++ showPt p1 ++ showPt p2 ++ showPt p3
 >
@@ -209,8 +207,10 @@ Some functions for debugging:
 > -- | output a trace of the algorithm when compiled with @-fdebug@.
 > type SweepStateM  = State SweepState
 >
+> assertTrace :: Bool -> String -> a -> a
 > assertTrace _ _ e  = e
-> 
+>
+> traceMessage :: Monad m => String -> m ()
 > traceMessage _ = return ()
 >
 > assert :: Bool -> String -> SweepStateM ()

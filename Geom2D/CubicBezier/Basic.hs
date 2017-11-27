@@ -1,4 +1,3 @@
-{-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE BangPatterns, FlexibleInstances, MultiParamTypeClasses, DeriveTraversable, ViewPatterns, PatternSynonyms, MultiWayIf #-}
 {-# LANGUAGE EmptyDataDecls #-}
 module Geom2D.CubicBezier.Basic
@@ -16,7 +15,6 @@ import Geom2D
 import Geom2D.CubicBezier.Numeric
 import Math.BernsteinPoly
 import Numeric.Integration.TanhSinh
-import Data.Monoid
 
 import qualified Data.Vector.Unboxed as V
 import qualified Data.Vector.Unboxed.Mutable as MV
@@ -121,14 +119,14 @@ instance (Num a) => AffineTransform (QuadBezier a) a where
     QuadBezier (transform t c0) (transform t c1) (transform t c2)
 
 -- | Return the open path as a list of curves.
-openPathCurves :: Fractional a => Path Open a -> [CubicBezier a]
+openPathCurves :: Fractional a => Path Open a -> [Either (Line a) (CubicBezier a)]
 openPathCurves (Path (LineTo p:r)) = openPathCurves' p r
 openPathCurves (Path (CurveTo _ _ p:r)) = openPathCurves' p r
 openPathCurves (Path []) = []
 
-openPathCurves' :: Fractional a => Point a -> [PathJoin a] -> [CubicBezier a]
-openPathCurves' p (LineTo p1:r) = makeLine p p1: openPathCurves' p1 r
-openPathCurves' p (CurveTo a b c:r) = CubicBezier p a b c: openPathCurves' c r
+openPathCurves' :: Fractional a => Point a -> [PathJoin a] -> [Either (Line a) (CubicBezier a)]
+openPathCurves' p (LineTo p1:r) = Left (Line p p1): openPathCurves' p1 r
+openPathCurves' p (CurveTo a b c:r) = Right (CubicBezier p a b c): openPathCurves' c r
 openPathCurves' _ [] = []
     
 makeLine :: Fractional a => Point a -> Point a -> CubicBezier a
@@ -566,7 +564,7 @@ closestBezierCurve cb p@(Point px py) t
      closestLinePt 
  | otherwise =
    -- circular arc divided by velocity
-   - (fastVectorAngle (rotateScaleVec (c ^-^ p) $* ((Point by' bx') ^* signum r_v))) * r_v
+   - fastVectorAngle (rotateScaleVec (c ^-^ p) $* (Point by' bx' ^* signum r_v)) * r_v
   where
     closestLinePt :: Double
     closestLinePt = ((px - bx)*bx' + (py - by)*by')/vSqr

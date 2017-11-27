@@ -211,7 +211,7 @@ unmetaAsOpen l m = closeOpenPath $ Path l'' <> Path m''
         (l'', m'') =
           case ct of
             CurveTo _ _ p -> (LineTo p: l', m'++[ct])
-            LineTo p -> (ct: l', m')
+            LineTo _ -> (ct: l', m')
                
 
 -- decompose into a list of subsegments that need to be solved.

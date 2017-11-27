@@ -27,7 +27,7 @@ infixl 6 ~+, ~-
 {-# RULES "toScaled/fromScaled" forall a. toScaled (fromScaled a) = a;
   "fromScaled/toScaled" forall a. fromScaled (toScaled a) = a; #-}
 
-toScaled :: (Unbox a, Num a) => BernsteinPoly a -> ScaledPoly a
+toScaled :: (Unbox a, Fractional a) => BernsteinPoly a -> ScaledPoly a
 toScaled (BernsteinPoly v) =
   ScaledPoly $
   V.zipWith (*) v $ binCoeff $ V.length v - 1
