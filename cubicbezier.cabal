@@ -36,6 +36,8 @@ Library
   Build-depends: base >= 4.8 && < 5, containers >= 0.5.3, integration >= 0.1.1, vector >= 0.10,
                  matrices >= 0.4.1, microlens >= 0.1.2, microlens-th >= 0.1.2, microlens-mtl >= 0.1.2, mtl >= 2.1.1,
                  fast-math >= 1.0.0, vector-space >= 0.10.4
+  if !impl(ghc>=8.0)
+    Build-depends: semigroups >= 0.16
   Exposed-Modules:
     Geom2D
     Geom2D.CubicBezier
