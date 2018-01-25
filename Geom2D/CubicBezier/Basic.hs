@@ -1,5 +1,5 @@
 {-# LANGUAGE PatternGuards #-}
-{-# LANGUAGE BangPatterns, FlexibleInstances, MultiParamTypeClasses, DeriveTraversable, ViewPatterns, PatternSynonyms, MultiWayIf #-}
+{-# LANGUAGE BangPatterns, CPP, FlexibleInstances, MultiParamTypeClasses, DeriveTraversable, ViewPatterns, PatternSynonyms, MultiWayIf #-}
 module Geom2D.CubicBezier.Basic
        (CubicBezier (..), QuadBezier (..), AnyBezier (..), GenericBezier(..),
         PathJoin (..), ClosedPath(..), OpenPath (..), AffineTransform (..), anyToCubic, anyToQuad,
@@ -16,6 +16,9 @@ import Geom2D.CubicBezier.Numeric
 import Math.BernsteinPoly
 import Numeric.Integration.TanhSinh
 import Data.Monoid ()
+#if !MIN_VERSION_base(4,11,0)
+import Data.Semigroup (Semigroup(..))
+#endif
 import Data.List (minimumBy)
 import Data.Function (on)
 import Data.VectorSpace
@@ -93,12 +96,17 @@ data OpenPath a = OpenPath [(Point a, PathJoin a)] (Point a)
 data ClosedPath a = ClosedPath [(Point a, PathJoin a)]
                   deriving (Show, Functor, Foldable, Traversable)
 
+instance Semigroup (OpenPath a) where
+  p1 <> OpenPath [] _ = p1
+  OpenPath [] _ <> p2 = p2
+  OpenPath joins1 _ <> OpenPath joins2 p =
+    OpenPath (joins1 ++ joins2) p
+
 instance Monoid (OpenPath a) where
   mempty = OpenPath [] (error "empty path")
-  mappend p1 (OpenPath [] _) = p1
-  mappend (OpenPath [] _) p2 = p2
-  mappend (OpenPath joins1 _) (OpenPath joins2 p) =
-    OpenPath (joins1 ++ joins2) p
+#if !MIN_VERSION_base(4,11,0)
+  mappend = (<>)
+#endif
 
 instance (Num a) => AffineTransform (PathJoin a) a where
   transform _ JoinLine = JoinLine
