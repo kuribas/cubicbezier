@@ -24,7 +24,7 @@ noTranslate (Transform a b _ c d _) =
 instance (Floating a, Eq a) => AffineTransform (Pen a) a where
   {-# SPECIALIZE transform :: Transform Double -> Pen Double -> Pen Double #-}
   transform t (PenEllipse trans _ _) =
-    let t2@(Transform a b c d e f) = transform t trans
+    let t2@(Transform a b _ d e _) = transform t trans
     in case inverse $ noTranslate t2 of
       Nothing -> pathToPen $ undefined
         -- Path [
@@ -71,7 +71,8 @@ penOffset :: (Floating a) => Pen a -> Point a -> Point a
 penOffset (PenEllipse trans leftInv _) dir =
   transform trans $ normVector $ leftInv $* dir
 
-penOffsetFun :: Pen Double -> (Double -> (DPoint, DPoint)) -> Double -> (Point Double, Point Double)
+penOffsetFun :: Pen Double -> (Double -> (DPoint, DPoint)) -> Double
+             -> (Point Double, Point Double)
 penOffsetFun pen f t =
   (px ^+^ penOffset pen px', px')
   where
@@ -97,3 +98,4 @@ penJoin :: Pen Double -> Point Double
         -> Point Double -> Path Open Double
 penJoin pen@(PenEllipse trans leftInv _) from to =
   undefined
+
