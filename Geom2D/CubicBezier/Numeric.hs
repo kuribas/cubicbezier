@@ -13,7 +13,7 @@ module Geom2D.CubicBezier.Numeric
 import qualified Data.Vector.Unboxed as V
 import Data.Vector.Unboxed.Mutable as MV
 import Data.Matrix.Unboxed as M
-import qualified Data.Matrix.Generic as G
+import qualified Data.Matrix.Class as G
 import qualified Data.Matrix.Unboxed.Mutable as MM
 import Control.Monad.ST
 import Control.Monad
