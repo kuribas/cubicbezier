@@ -101,7 +101,7 @@ data MetaNodeType a = Open
                     -- the node.  If it is an endpoint or corner
                     -- point, it will have curl of 1.
                   | Curl {curlgamma :: a}
-                    -- ^ The node becomes and endpoint or a corner
+                    -- ^ The node becomes an endpoint or a corner
                     -- point.  The curl specifies how much the segment
                     -- `curves`.  A curl of `gamma` means that the
                     -- curvature is `gamma` times that of the
