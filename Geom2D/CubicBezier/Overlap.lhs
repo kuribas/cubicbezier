@@ -47,6 +47,7 @@ Let's begin with declaring the module and library imports:
 > import Data.Foldable (traverse_)
 > import Data.Functor ((<$>))
 > import Data.List (sortBy, sort, intercalate, intersperse)
+> import Control.Monad
 > import Control.Monad.State.Strict
 > import Lens.Micro
 > import Lens.Micro.TH
