@@ -51,6 +51,7 @@ Library
     Geom2D.CubicBezier.Stroke
     Math.BernsteinPoly
     Geom2D.CubicBezier.Numeric
+  default-language: Haskell2010
 
 test-suite test
   type: exitcode-stdio-1.0
@@ -64,3 +65,4 @@ test-suite test
     tasty-hunit >= 0.9,
     parsec >= 3.0,
     cubicbezier
+  default-language: Haskell2010
