@@ -7,10 +7,10 @@ Stability:	Unstable
 License:	BSD3
 License-file:	LICENSE
 Author:		Kristof Bastiaensen
-Maintainer:	Kristof Bastiaensen
+Maintainer:	Kristof Bastiaensen, byorgey@gmail.com
 Bug-Reports: 	https://github.com/kuribas/cubicbezier/issues
 Build-type:	Simple
-Cabal-version:	>=1.8
+Cabal-version:	>=1.10
 Description:	This library supports efficient manipulating of 2D cubic bezier curves, for use in graphics or typography.  Supported features are:
   .
   Evaluating bezier curves and derivatives, affine transformations on bezier curves, arclength and inverse arclength, intersections between two curves, intersection between a curve and a line, curvature and radius of curvature, finding tangents parallel to a vector, finding inflection points and cusps.
